@@ -4,7 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ShareQ - 友達と問題作成・リマインダー</title>
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts & FontAwesome Icons -->
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -30,6 +32,7 @@
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
 
+  <!-- React, ReactDOM, and Babel Standalone (for JSX parsing in browser) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -37,9 +40,9 @@
   <script type="text/babel" data-type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useRef, useMemo } = React;
 
     // --- Firebase環境設定 ---
     const firebaseConfig = typeof __firebase_config !== 'undefined' 
@@ -63,34 +66,35 @@
       const [user, setUser] = useState(null);
       const [username, setUsername] = useState('');
       const [isSettingUsername, setIsSettingUsername] = useState(false);
-      const [activeTab, setActiveTab] = useState('dashboard');
+      const [activeTab, setActiveTab] = useState('dashboard'); // dashboard, questions, quiz, reminders, members
       
       // グループ管理
       const [groupId, setGroupId] = useState('default-room');
       const [joinRoomInput, setJoinRoomInput] = useState('');
+      const [copySuccess, setCopySuccess] = useState(false);
 
-      // データリスト（Firestoreから同期。セグメントエラー対策のため、JSメモリ側でroomIdフィルタ）
+      // データリスト（Firestoreから同期）
       const [questions, setQuestions] = useState([]);
       const [activityLog, setActivityLog] = useState([]);
       const [roomMembers, setRoomMembers] = useState([]);
 
       // モーダル・フォーム状態
       const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-      const [qType, setQType] = useState('choice'); 
+      const [qType, setQType] = useState('choice'); // choice, ox, text
       const [qTitle, setQTitle] = useState('');
       const [qOptions, setQOptions] = useState(['', '', '', '']);
       const [qCorrectChoice, setQCorrectChoice] = useState(0);
       const [qCorrectOx, setQCorrectOx] = useState('O');
       const [qCorrectText, setQCorrectText] = useState('');
       const [qExplanation, setQExplanation] = useState('');
-      const [qInterval, setQInterval] = useState('1'); 
+      const [qInterval, setQInterval] = useState('1'); // リマインダー用の復習間隔（日）
 
       // クイズ実行状態
       const [quizActive, setQuizActive] = useState(false);
       const [quizIndex, setQuizIndex] = useState(0);
       const [selectedAnswer, setSelectedAnswer] = useState(null);
       const [textAnswer, setTextAnswer] = useState('');
-      const [quizResults, setQuizResults] = useState([]); 
+      const [quizResults, setQuizResults] = useState([]); // [{questionId, isCorrect}]
       const [quizFinished, setQuizFinished] = useState(false);
 
       // 通知トースト
@@ -112,7 +116,7 @@
             }
           } catch (err) {
             console.error("Auth Error:", err);
-            showToast("認証に失敗しました。", "error");
+            showToast("認証に失敗しました。オフラインモードで実行します。", "error");
           }
         };
         initAuth();
@@ -120,6 +124,7 @@
         const unsubscribe = onAuthStateChanged(auth, (usr) => {
           if (usr) {
             setUser(usr);
+            // ローカルストレージ等から一時的に名前を取得
             const savedName = localStorage.getItem(`uname_${usr.uid}`);
             setUsername(savedName || `ユーザー_${usr.uid.substring(0, 5)}`);
           }
@@ -144,6 +149,7 @@
               lastActive: Date.now()
             }, { merge: true });
             
+            // アクティビティログ追加
             await addActivity(`${username} が参加しました。`);
           } catch (e) {
             console.error(e);
@@ -151,7 +157,7 @@
         }
       };
 
-      // アクティビティログの登録
+      // 共同アクティビティログの登録
       const addActivity = async (actionText) => {
         if (!user) return;
         try {
@@ -167,11 +173,11 @@
         }
       };
 
-      // --- Firestore データ同期（セグメントエラーを回避するため5つの奇数セグメント固定） ---
+      // --- Firestore データ監視リアルタイム更新 ---
       useEffect(() => {
         if (!user || !groupId) return;
 
-        // 1. 問題データの取得
+        // 1. 問題データの取得 (セグメント数5のコレクションから取得し、JSメモリでフィルタ)
         const qCollection = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
         const unsubQuestions = onSnapshot(qCollection, (snapshot) => {
           const list = [];
@@ -181,11 +187,14 @@
               list.push({ id: doc.id, ...data });
             }
           });
+          // 作成日時順
           list.sort((a, b) => b.createdAt - a.createdAt);
           setQuestions(list);
-        }, (err) => console.error(err));
+        }, (err) => {
+          console.error("Questions load error", err);
+        });
 
-        // 2. メンバーリストの取得
+        // 2. メンバーリストの取得 (JSメモリでルーム内フィルタ)
         const mCollection = collection(db, 'artifacts', appId, 'public', 'data', 'members');
         const unsubMembers = onSnapshot(mCollection, (snapshot) => {
           const list = [];
@@ -198,7 +207,7 @@
           setRoomMembers(list);
         }, (err) => console.error(err));
 
-        // 3. アクティビティログの取得
+        // 3. アクティビティログの取得 (JSメモリでルーム内フィルタ)
         const aCollection = collection(db, 'artifacts', appId, 'public', 'data', 'activities');
         const unsubActivities = onSnapshot(aCollection, (snapshot) => {
           const list = [];
@@ -209,10 +218,10 @@
             }
           });
           list.sort((a, b) => b.timestamp - a.timestamp);
-          setActivityLog(list.slice(0, 15));
+          setActivityLog(list.slice(0, 15)); // 直近15件
         }, (err) => console.error(err));
 
-        // メンバー登録
+        // 自身をメンバー登録
         const registerMember = async () => {
           const memberDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', `${groupId}_${user.uid}`);
           await setDoc(memberDocRef, {
@@ -231,14 +240,17 @@
         };
       }, [user, groupId, username]);
 
+      // --- ルームの変更・新規作成 ---
       const handleJoinRoom = (e) => {
         e.preventDefault();
         if (!joinRoomInput.trim()) return;
-        setGroupId(joinRoomInput.trim());
-        showToast(`ルーム「${joinRoomInput.trim()}」に移動しました。`);
+        const targetRoom = joinRoomInput.trim();
+        setGroupId(targetRoom);
+        showToast(`ルーム「${targetRoom}」に切り替えました。`);
         setJoinRoomInput('');
       };
 
+      // クリップボードに招待URLをコピー
       const copyInviteLink = () => {
         const textToCopy = `${window.location.origin}${window.location.pathname}?room=${groupId}`;
         const tempInput = document.createElement('input');
@@ -247,23 +259,26 @@
         tempInput.select();
         try {
           document.execCommand('copy');
-          showToast("招待URLをクリップボードにコピーしました！");
+          setCopySuccess(true);
+          showToast("招待用ルームID/リンクをコピーしました！");
+          setTimeout(() => setCopySuccess(false), 2000);
         } catch (err) {
           showToast("コピーに失敗しました", "error");
         }
         document.body.removeChild(tempInput);
       };
 
+      // パラメータからのルーム読み込み
       useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const roomParam = params.get('room');
         if (roomParam) {
           setGroupId(roomParam);
-          showToast(`リンクからルーム「${roomParam}」に入室しました。`);
+          showToast(`招待リンクからルーム 「${roomParam}」 に入室しました。`);
         }
       }, []);
 
-      // --- 問題作成 ---
+      // --- 問題作成処理 ---
       const handleCreateQuestion = async (e) => {
         e.preventDefault();
         if (!qTitle.trim()) {
@@ -287,7 +302,7 @@
         } else {
           correctAnswer = qCorrectText.trim();
           if (!correctAnswer) {
-            showToast("正解を入力してください。", "error");
+            showToast("正解のテキストを入力してください。", "error");
             return;
           }
         }
@@ -302,17 +317,21 @@
           creator: username || user.uid.substring(0, 5),
           creatorId: user.uid,
           createdAt: Date.now(),
+          // リマインダー設定（忘却曲線復習用）
           intervalDays: parseInt(qInterval) || 1,
           nextReviewDate: Date.now() + (parseInt(qInterval) || 1) * 24 * 60 * 60 * 1000,
-          timesReviewed: 0
+          timesReviewed: 0,
+          difficulty: 'normal'
         };
 
         try {
           const qCollection = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
           await addDoc(qCollection, newQuestion);
+          
           await addActivity(`新しい問題「${qTitle.substring(0, 10)}...」を追加しました。`);
           showToast("新しい問題を作成しました！");
           
+          // フォーム初期化
           setQTitle('');
           setQOptions(['', '', '', '']);
           setQCorrectText('');
@@ -320,12 +339,13 @@
           setIsCreateModalOpen(false);
         } catch (err) {
           console.error(err);
-          showToast("作成に失敗しました。", "error");
+          showToast("問題の作成に失敗しました。", "error");
         }
       };
 
+      // --- 問題削除 ---
       const handleDeleteQuestion = async (qId, title) => {
-        if (!window.confirm(`「${title}」を削除しますか？`)) return;
+        if (!window.confirm(`「${title}」を本当に削除しますか？`)) return;
         try {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'questions', qId);
           await deleteDoc(docRef);
@@ -336,10 +356,10 @@
         }
       };
 
-      // --- クイズシステム制御 ---
+      // --- クイズセッション制御 ---
       const startQuiz = () => {
         if (questions.length === 0) {
-          showToast("問題がまだありません。", "error");
+          showToast("問題がまだありません。作成してください。", "error");
           return;
         }
         setQuizActive(true);
@@ -354,14 +374,16 @@
         const currentQ = questions[quizIndex];
         let isCorrect = false;
 
-        if (currentQ.type === 'choice' || currentQ.type === 'ox') {
+        if (currentQ.type === 'choice') {
+          isCorrect = answer === currentQ.correctAnswer;
+        } else if (currentQ.type === 'ox') {
           isCorrect = answer === currentQ.correctAnswer;
         } else {
           isCorrect = answer.trim().toLowerCase() === currentQ.correctAnswer.trim().toLowerCase();
         }
 
         setSelectedAnswer(answer);
-        setQuizResults([...quizResults, { questionId: currentQ.id, isCorrect }]);
+        setQuizResults([...quizResults, { questionId: currentQ.id, title: currentQ.title, isCorrect, chosen: answer, correct: currentQ.correctAnswer }]);
       };
 
       const nextQuestion = () => {
@@ -371,19 +393,27 @@
           setQuizIndex(quizIndex + 1);
         } else {
           setQuizFinished(true);
+          // 復習の記録とリマインダー日程の更新
           updateReminderSchedules();
         }
       };
 
+      // クイズ終了時に忘却曲線に基づく復習スケジュールを自動更新
       const updateReminderSchedules = async () => {
         quizResults.forEach(async (res) => {
           const qObj = questions.find(q => q.id === res.questionId);
           if (!qObj) return;
 
           let newInterval = qObj.intervalDays || 1;
-          newInterval = res.isCorrect ? Math.min(newInterval * 2, 30) : 1;
-          const nextDate = Date.now() + newInterval * 24 * 60 * 60 * 1000;
+          if (res.isCorrect) {
+            // 正解したら、次回までの間隔を2倍にする（1日 -> 2日 -> 4日 -> 8日 ...）
+            newInterval = Math.min(newInterval * 2, 30); 
+          } else {
+            // 間違えたら復習スパンを短く（1日）に戻す
+            newInterval = 1;
+          }
 
+          const nextDate = Date.now() + newInterval * 24 * 60 * 60 * 1000;
           try {
             const qDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'questions', qObj.id);
             await updateDoc(qDocRef, {
@@ -395,19 +425,26 @@
             console.error(e);
           }
         });
-        showToast("復習スケジュールを更新しました！");
+        showToast("クイズ結果を保存し、復習予定を更新しました！");
       };
 
+      // --- リマインダー管理（今日復習が必要な問題） ---
       const reviewRequiredQuestions = useMemo(() => {
         const now = Date.now();
         return questions.filter(q => !q.nextReviewDate || q.nextReviewDate <= now);
       }, [questions]);
 
+      // リマインダー（手動での完了・リセット）
       const markAsReviewed = async (qId, wasCorrect) => {
         const qObj = questions.find(q => q.id === qId);
         if (!qObj) return;
 
-        let newInterval = wasCorrect ? Math.min((qObj.intervalDays || 1) * 2, 30) : 1;
+        let newInterval = qObj.intervalDays || 1;
+        if (wasCorrect) {
+          newInterval = Math.min(newInterval * 2, 30);
+        } else {
+          newInterval = 1;
+        }
         const nextDate = Date.now() + newInterval * 24 * 60 * 60 * 1000;
 
         try {
@@ -425,11 +462,13 @@
 
       return (
         <div className="flex flex-col min-h-screen">
+          
+          {/* トースト通知 */}
           {toast && (
-            <div className={`fixed top-5 right-5 z-50 px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 border text-white ${
+            <div className={`fixed top-5 right-5 z-50 px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 border transition-all transform duration-300 translate-y-0 text-white ${
               toast.type === 'error' ? 'bg-rose-500 border-rose-400' : 'bg-emerald-600 border-emerald-500'
             }`}>
-              <i className={`fa-solid ${toast.type === 'error' ? 'fa-circle-xmark' : 'fa-circle-check'}`}></i>
+              <i className={`fa-solid ${toast.type === 'error' ? 'fa-circle-xmark' : 'fa-circle-check'} text-lg`}></i>
               <span className="font-medium text-sm">{toast.message}</span>
             </div>
           )}
@@ -437,21 +476,27 @@
           {/* ヘッダー */}
           <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 sm:px-6">
             <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              
+              {/* ロゴ＆ルーム表示 */}
               <div className="flex items-center gap-4">
-                <div className="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md">
+                <div className="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-100">
                   <i className="fa-solid fa-graduation-cap text-xl"></i>
                 </div>
                 <div>
-                  <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                    ShareQ <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100">Beta</span>
+                  <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+                    ShareQ
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100">Beta</span>
                   </h1>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    現在のルーム: <strong className="text-indigo-600">{groupId}</strong>
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
+                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    現在の共同ルーム: <strong className="text-indigo-600 font-semibold">{groupId}</strong>
                   </p>
                 </div>
               </div>
 
+              {/* ルーム招待 ＆ プロファイル */}
               <div className="flex flex-wrap items-center gap-3">
+                {/* 部屋の切り替え */}
                 <form onSubmit={handleJoinRoom} className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
                   <input
                     type="text"
@@ -460,39 +505,69 @@
                     value={joinRoomInput}
                     onChange={(e) => setJoinRoomInput(e.target.value)}
                   />
-                  <button type="submit" className="bg-white hover:bg-slate-50 text-slate-700 p-1.5 rounded-md text-xs font-semibold shadow-sm">移動</button>
+                  <button type="submit" className="bg-white hover:bg-slate-50 text-slate-700 p-1.5 rounded-md text-xs font-semibold shadow-sm transition">
+                    移動
+                  </button>
                 </form>
 
-                <button onClick={copyInviteLink} className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm">
+                {/* 友達を招待 */}
+                <button
+                  onClick={copyInviteLink}
+                  className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
+                >
                   <i className="fa-solid fa-user-plus"></i>
                   <span>招待リンク</span>
                 </button>
 
+                {/* ユーザー名設定 */}
                 <div className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-2">
                   <i className="fa-solid fa-user text-slate-500 text-xs"></i>
-                  <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">{username || 'ゲスト'}</span>
-                  <button onClick={() => setIsSettingUsername(true)} className="text-slate-400 hover:text-indigo-600"><i className="fa-solid fa-pen text-[10px]"></i></button>
+                  <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">
+                    {username || 'ゲストユーザー'}
+                  </span>
+                  <button 
+                    onClick={() => setIsSettingUsername(true)}
+                    className="text-slate-400 hover:text-indigo-600 transition"
+                    title="名前を変更"
+                  >
+                    <i className="fa-solid fa-pen text-[10px]"></i>
+                  </button>
                 </div>
               </div>
+
             </div>
           </header>
 
-          {/* ユーザー名変更モーダル */}
+          {/* ユーザー名編集モーダル */}
           {isSettingUsername && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border">
-                <h3 className="text-lg font-bold mb-2">ユーザー名の変更</h3>
+              <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
+                <h3 className="text-lg font-bold text-slate-900 mb-2">ユーザー名の変更</h3>
+                <p className="text-xs text-slate-500 mb-4">
+                  友達と一緒に問題を解いたり作成したりする際に表示されるニックネームを設定します。
+                </p>
                 <input
                   type="text"
-                  className="w-full px-4 py-2 border rounded-xl mb-4 text-sm"
-                  placeholder="ユーザー名..."
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl mb-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
+                  placeholder="例: たろう、Sakura"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   maxLength={15}
+                  autoFocus
                 />
                 <div className="flex gap-2 justify-end">
-                  <button onClick={() => setIsSettingUsername(false)} className="px-4 py-2 text-xs font-medium text-slate-600">キャンセル</button>
-                  <button onClick={handleSaveUsername} className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 rounded-lg">保存する</button>
+                  <button
+                    onClick={() => setIsSettingUsername(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={handleSaveUsername}
+                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition"
+                  >
+                    保存する
+                  </button>
                 </div>
               </div>
             </div>
@@ -500,110 +575,886 @@
 
           {/* メインレイアウト */}
           <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+            
+            {/* 左側：ナビゲーション・サイドバー */}
             <div className="lg:col-span-1 flex flex-col gap-6">
-              <div className="bg-white rounded-2xl border p-3 shadow-sm">
-                <p className="text-[11px] font-bold text-slate-400 uppercase px-3 mb-2">メニュー</p>
+              
+              {/* ナビゲーションメニュー */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-sm">
+                <p className="text-[11px] font-bold tracking-wider text-slate-400 uppercase px-3 mb-2">メニュー</p>
                 <nav className="space-y-1">
-                  <button onClick={() => { setActiveTab('dashboard'); setQuizActive(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-                    <span><i className="fa-solid fa-gauge-high mr-2"></i>ダッシュボード</span>
+                  <button
+                    onClick={() => { setActiveTab('dashboard'); setQuizActive(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
+                      activeTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <i className="fa-solid fa-gauge-high"></i>
+                      ダッシュボード
+                    </span>
+                    <i className="fa-solid fa-chevron-right text-[10px] opacity-60"></i>
                   </button>
-                  <button onClick={() => { setActiveTab('questions'); setQuizActive(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold ${activeTab === 'questions' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-                    <span><i className="fa-solid fa-list-check mr-2"></i>問題一覧・作成</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${activeTab === 'questions' ? 'bg-indigo-500 text-white' : 'bg-slate-100'}`}>{questions.length}</span>
+
+                  <button
+                    onClick={() => { setActiveTab('questions'); setQuizActive(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
+                      activeTab === 'questions' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <i className="fa-solid fa-list-check"></i>
+                      問題一覧・作成
+                    </span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${activeTab === 'questions' ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                      {questions.length}
+                    </span>
                   </button>
-                  <button onClick={() => { setActiveTab('reminders'); setQuizActive(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold ${activeTab === 'reminders' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-                    <span><i className="fa-solid fa-clock-rotate-left mr-2"></i>今日の復習</span>
-                    {reviewRequiredQuestions.length > 0 && <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full animate-bounce">{reviewRequiredQuestions.length}</span>}
+
+                  <button
+                    onClick={() => { setActiveTab('reminders'); setQuizActive(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
+                      activeTab === 'reminders' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <i className="fa-solid fa-clock-rotate-left"></i>
+                      今日の復習・リマインダー
+                    </span>
+                    {reviewRequiredQuestions.length > 0 && (
+                      <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-bounce">
+                        {reviewRequiredQuestions.length}
+                      </span>
+                    )}
                   </button>
-                  <button onClick={() => { setActiveTab('members'); setQuizActive(false); }} className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold ${activeTab === 'members' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>
-                    <span><i className="fa-solid fa-users mr-2"></i>メンバー</span>
+
+                  <button
+                    onClick={() => { setActiveTab('members'); setQuizActive(false); }}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
+                      activeTab === 'members' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <i className="fa-solid fa-users"></i>
+                      ルームのメンバー
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                      {roomMembers.length}
+                    </span>
                   </button>
                 </nav>
-                <div className="border-t mt-4 pt-4 px-3">
-                  <button onClick={startQuiz} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-bold shadow-md flex items-center justify-center gap-2">
-                    <i className="fa-solid fa-play text-xs"></i>全員分のクイズに挑戦
+
+                <div className="border-t border-slate-100 mt-4 pt-4 px-3">
+                  <button
+                    onClick={startQuiz}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-sm font-bold shadow-md shadow-emerald-100 hover:shadow-lg transition flex items-center justify-center gap-2"
+                  >
+                    <i className="fa-solid fa-play text-xs"></i>
+                    全員分のクイズに挑戦
                   </button>
                 </div>
               </div>
+
+              {/* グループ詳細 & ルームID */}
+              <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white rounded-2xl p-5 shadow-lg relative overflow-hidden">
+                <div className="absolute top-0 right-0 transform translate-x-4 -translate-y-4 opacity-10">
+                  <i className="fa-solid fa-users text-9xl"></i>
+                </div>
+                <h4 className="text-xs font-bold text-indigo-300 uppercase tracking-wider mb-1">ルーム情報</h4>
+                <p className="text-lg font-bold truncate mb-3">{groupId}</p>
+                
+                <div className="space-y-2.5 text-xs text-indigo-100">
+                  <div className="flex justify-between">
+                    <span className="opacity-70">作成された全問題:</span>
+                    <span className="font-bold">{questions.length} 問</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">復習が必要な問題:</span>
+                    <span className="font-bold text-amber-300">{reviewRequiredQuestions.length} 問</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="opacity-70">参加メンバー:</span>
+                    <span className="font-bold">{roomMembers.length} 人</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-indigo-800 flex gap-2">
+                  <button 
+                    onClick={copyInviteLink}
+                    className="flex-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-1.5 rounded-lg text-center transition"
+                  >
+                    <i className="fa-solid fa-copy mr-1.5"></i>
+                    招待をコピー
+                  </button>
+                </div>
+              </div>
+
             </div>
 
-            {/* コンテンツ表示エリア */}
+            {/* 右側メインコンテンツ */}
             <div className="lg:col-span-3 flex flex-col gap-6">
+              
+              {/* --- クイズプレイ画面 --- */}
               {quizActive ? (
-                <div className="bg-white rounded-2xl border p-6 shadow-md">
-                  <div className="flex items-center justify-between border-b pb-4 mb-6">
-                    <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 rounded-full font-bold">問題 {quizIndex + 1} / {questions.length}</span>
-                    <button onClick={() => setQuizActive(false)} className="text-slate-400 hover:text-rose-600 text-sm"><i className="fa-solid fa-xmark mr-1"></i>中断</button>
+                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-md">
+                  
+                  {/* ヘッダー・進捗 */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+                    <div className="flex items-center gap-3">
+                      <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 rounded-full font-bold">
+                        問題 {quizIndex + 1} / {questions.length}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        作成者: <strong className="text-slate-700">{questions[quizIndex]?.creator}</strong>
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => { setQuizActive(false); setQuizFinished(false); }}
+                      className="text-slate-400 hover:text-rose-600 transition text-sm flex items-center gap-1"
+                    >
+                      <i className="fa-solid fa-xmark"></i>
+                      中断する
+                    </button>
                   </div>
 
                   {!quizFinished ? (
                     <div>
-                      <h2 className="text-xl font-bold mb-6">{questions[quizIndex]?.title}</h2>
+                      {/* 問題種別 */}
+                      <div className="mb-3">
+                        <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                          {questions[quizIndex]?.type === 'choice' && '4択問題'}
+                          {questions[quizIndex]?.type === 'ox' && '○×判定'}
+                          {questions[quizIndex]?.type === 'text' && '記述式・穴埋め'}
+                        </span>
+                      </div>
+
+                      {/* 問題本文 */}
+                      <h2 className="text-xl font-bold text-slate-900 mb-6 leading-relaxed">
+                        {questions[quizIndex]?.title}
+                      </h2>
+
+                      {/* 回答エリア */}
                       <div className="mb-6">
+                        
+                        {/* 4択 */}
                         {questions[quizIndex]?.type === 'choice' && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {questions[quizIndex]?.options.map((opt, oIdx) => (
-                              <button key={oIdx} disabled={selectedAnswer !== null} onClick={() => handleAnswerSubmit(opt)} className={`w-full p-4 rounded-xl border-2 text-left text-sm transition ${selectedAnswer ? (opt === questions[quizIndex].correctAnswer ? 'bg-emerald-50 border-emerald-500 text-emerald-800' : 'opacity-50') : 'hover:bg-slate-50'}`}>
-                                {opt}
-                              </button>
-                            ))}
+                            {questions[quizIndex]?.options.map((opt, oIdx) => {
+                              const isCorrectAnswer = opt === questions[quizIndex].correctAnswer;
+                              const isSelected = selectedAnswer === opt;
+                              let btnStyle = "border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/30 text-slate-700";
+                              
+                              if (selectedAnswer) {
+                                if (isCorrectAnswer) {
+                                  btnStyle = "bg-emerald-50 border-emerald-500 text-emerald-800 font-semibold ring-2 ring-emerald-200";
+                                } else if (isSelected) {
+                                  btnStyle = "bg-rose-50 border-rose-500 text-rose-800 font-semibold ring-2 ring-rose-200";
+                                } else {
+                                  btnStyle = "opacity-50 border-slate-200 text-slate-400";
+                                }
+                              }
+
+                              return (
+                                <button
+                                  key={oIdx}
+                                  disabled={selectedAnswer !== null}
+                                  onClick={() => handleAnswerSubmit(opt)}
+                                  className={`w-full p-4 rounded-xl border-2 text-left text-sm transition flex items-center justify-between ${btnStyle}`}
+                                >
+                                  <span>{opt}</span>
+                                  {selectedAnswer && isCorrectAnswer && <i className="fa-solid fa-circle-check text-emerald-600"></i>}
+                                  {selectedAnswer && isSelected && !isCorrectAnswer && <i className="fa-solid fa-circle-xmark text-rose-600"></i>}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
+
+                        {/* OX問題 */}
                         {questions[quizIndex]?.type === 'ox' && (
                           <div className="grid grid-cols-2 gap-4">
-                            {['O', 'X'].map((ox) => (
-                              <button key={ox} disabled={selectedAnswer !== null} onClick={() => handleAnswerSubmit(ox)} className={`py-6 border-2 rounded-2xl font-bold text-2xl ${selectedAnswer ? (ox === questions[quizIndex].correctAnswer ? 'bg-emerald-50 border-emerald-500' : 'opacity-50') : 'hover:bg-slate-50'}`}>
-                                {ox}
-                              </button>
-                            ))}
+                            {['O', 'X'].map((ox) => {
+                              const isCorrectAnswer = ox === questions[quizIndex].correctAnswer;
+                              const isSelected = selectedAnswer === ox;
+                              let btnStyle = "border-slate-200 text-slate-800 text-2xl py-6";
+                              
+                              if (selectedAnswer) {
+                                if (isCorrectAnswer) {
+                                  btnStyle = "bg-emerald-50 border-emerald-500 text-emerald-800 font-semibold ring-2 ring-emerald-200 text-2xl py-6";
+                                } else if (isSelected) {
+                                  btnStyle = "bg-rose-50 border-rose-500 text-rose-800 font-semibold ring-2 ring-rose-200 text-2xl py-6";
+                                } else {
+                                  btnStyle = "opacity-50 border-slate-200 text-slate-400 text-2xl py-6";
+                                }
+                              }
+
+                              return (
+                                <button
+                                  key={ox}
+                                  disabled={selectedAnswer !== null}
+                                  onClick={() => handleAnswerSubmit(ox)}
+                                  className={`rounded-2xl border-2 transition flex flex-col items-center justify-center gap-2 ${btnStyle}`}
+                                >
+                                  <span className="font-extrabold">{ox}</span>
+                                  <span className="text-xs font-semibold">{ox === 'O' ? '正しい' : '誤り'}</span>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
+
+                        {/* 記述式 */}
                         {questions[quizIndex]?.type === 'text' && (
                           <div>
                             {selectedAnswer === null ? (
                               <div className="flex gap-2">
-                                <input type="text" className="flex-1 px-4 py-3 border-2 rounded-xl text-sm" placeholder="解答を入力..." value={textAnswer} onChange={(e) => setTextAnswer(e.target.value)} />
-                                <button onClick={() => handleAnswerSubmit(textAnswer)} className="bg-indigo-600 text-white px-6 rounded-xl text-sm font-bold">決定</button>
+                                <input
+                                  type="text"
+                                  className="flex-1 px-4 py-3 border-2 border-slate-200 rounded-xl outline-none focus:border-indigo-500 transition text-sm"
+                                  placeholder="解答を入力してください..."
+                                  value={textAnswer}
+                                  onChange={(e) => setTextAnswer(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleAnswerSubmit(textAnswer)}
+                                />
+                                <button
+                                  onClick={() => handleAnswerSubmit(textAnswer)}
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 rounded-xl text-sm font-bold transition"
+                                >
+                                  決定
+                                </button>
                               </div>
                             ) : (
-                              <div className="p-4 bg-slate-50 rounded-xl text-sm">
-                                <p>あなたの回答: <strong>{selectedAnswer}</strong></p>
-                                <p className="mt-2 text-emerald-600">正解: <strong>{questions[quizIndex].correctAnswer}</strong></p>
+                              <div className="p-4 rounded-xl border bg-slate-50 space-y-3">
+                                <div className="flex justify-between items-center text-sm">
+                                  <span className="text-slate-500">あなたの回答:</span>
+                                  <span className={`font-bold ${selectedAnswer.trim().toLowerCase() === questions[quizIndex].correctAnswer.trim().toLowerCase() ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    {selectedAnswer || '(未入力)'}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between items-center text-sm border-t border-slate-200/60 pt-2">
+                                  <span className="text-slate-500">模範解答:</span>
+                                  <span className="font-bold text-emerald-600">{questions[quizIndex].correctAnswer}</span>
+                                </div>
                               </div>
                             )}
                           </div>
                         )}
+
                       </div>
 
+                      {/* 解説 ＆ 次へボタン */}
                       {selectedAnswer !== null && (
-                        <div className="mt-6 pt-6 border-t">
-                          {questions[quizIndex]?.explanation && <p className="text-xs text-slate-500 bg-slate-50 p-3 rounded-lg mb-4">{questions[quizIndex].explanation}</p>}
-                          <button onClick={nextQuestion} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold">次へ</button>
+                        <div className="mt-6 pt-6 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                          {questions[quizIndex]?.explanation && (
+                            <div className="bg-indigo-50/50 rounded-xl p-4 border border-indigo-100/50 mb-4">
+                              <h4 className="text-xs font-bold text-indigo-800 mb-1 flex items-center gap-1">
+                                <i className="fa-solid fa-circle-info"></i>
+                                解説
+                              </h4>
+                              <p className="text-xs text-indigo-950 leading-relaxed">{questions[quizIndex].explanation}</p>
+                            </div>
+                          )}
+
+                          <button
+                            onClick={nextQuestion}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition shadow-md shadow-indigo-100"
+                          >
+                            <span>{quizIndex + 1 < questions.length ? '次の問題へ' : '結果を見る'}</span>
+                            <i className="fa-solid fa-arrow-right"></i>
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
+                  ) : (
+                    // クイズ終了画面
+                    <div className="text-center py-8">
+                      <div className="inline-flex items-center justify-center w-20 h-20 bg-emerald-100 rounded-full mb-4">
+                        <i className="fa-solid fa-square-poll-vertical text-4xl text-emerald-600"></i>
+                      </div>
+                      <h3 className="text-2xl font-black text-slate-900 mb-1">お疲れ様でした！</h3>
+                      <p className="text-sm text-slate-500 mb-6">すべてのクイズへの解答が完了しました。</p>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 max-w-md mx-auto mb-8">
+                        <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">総合成績</div>
+                        <div className="text-4xl font-extrabold text-slate-900 mb-2">
+                          {quizResults.filter(r => r.isCorrect).length} <span className="text-lg font-semibold text-slate-500">/ {questions.length} 問正解</span>
+                        </div>
+                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mb-4">
+                          <div 
+                            className="bg-emerald-500 h-full transition-all duration-1000" 
+                            style={{ width: `${(quizResults.filter(r => r.isCorrect).length / questions.length) * 100}%` }}
+                          ></div>
+                        </div>
+
+                        {/* リマインダーシステムへの反映通知 */}
+                        <div className="text-left text-xs bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-indigo-800 flex gap-2">
+                          <i className="fa-solid fa-bell text-sm mt-0.5"></i>
+                          <div>
+                            <strong className="font-semibold block mb-0.5">忘却曲線リマインダーを更新しました</strong>
+                            正解した問題は復習間隔が長く、間違えた問題は短くなり、適切なタイミングで「復習」タブにリコメンドされます。
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3 justify-center">
+                        <button
+                          onClick={() => { setQuizActive(false); setQuizFinished(false); }}
+                          className="border border-slate-200 hover:bg-slate-50 px-6 py-2.5 rounded-xl text-sm font-semibold text-slate-700 transition"
+                        >
+                          ダッシュボードへ
+                        </button>
+                        <button
+                          onClick={startQuiz}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold transition"
+                        >
+                          もう一度挑戦
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              ) : (
+                /* --- 通常コンテンツ（タブ切り替え） --- */
+                <div>
+                  
+                  {/* --- 1. ダッシュボードタブ --- */}
+                  {activeTab === 'dashboard' && (
+                    <div className="space-y-6">
+                      
+                      {/* ウェルカムバナー */}
+                      <div className="bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-800 rounded-3xl text-white p-6 sm:p-8 shadow-xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 transform translate-x-12 -translate-y-8 opacity-15">
+                          <i className="fa-solid fa-graduation-cap text-[200px]"></i>
+                        </div>
+                        <div className="relative z-10 max-w-lg">
+                          <h2 className="text-2xl sm:text-3xl font-black mb-2 leading-tight">
+                            友達と一緒に学んで、<br className="hidden sm:inline" />確実に記憶に定着させよう
+                          </h2>
+                          <p className="text-sm text-indigo-100 mb-6 leading-relaxed">
+                            ここは共同学習のための専用スペースです。誰かが作った問題はリアルタイムで全員に同期されます。
+                          </p>
+                          <div className="flex flex-wrap gap-3">
+                            <button
+                              onClick={() => setIsCreateModalOpen(true)}
+                              className="bg-white text-indigo-900 hover:bg-indigo-50 px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
+                            >
+                              <i className="fa-solid fa-plus"></i>
+                              問題を作成する
+                            </button>
+                            <button
+                              onClick={startQuiz}
+                              className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
+                            >
+                              <i className="fa-solid fa-play"></i>
+                              クイズを始める
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* クイック統計 */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 flex items-center gap-4 shadow-sm">
+                          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+                            <i className="fa-solid fa-book-open text-xl"></i>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 font-bold block">登録された全問題</span>
+                            <span className="text-2xl font-black text-slate-800">{questions.length} <span className="text-xs text-slate-400 font-normal">問</span></span>
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 flex items-center gap-4 shadow-sm">
+                          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl animate-pulse">
+                            <i className="fa-solid fa-hourglass-half text-xl"></i>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 font-bold block">本日の要復習</span>
+                            <span className="text-2xl font-black text-amber-600">{reviewRequiredQuestions.length} <span className="text-xs text-slate-400 font-normal">問</span></span>
+                          </div>
+                        </div>
+
+                        <div className="bg-white rounded-2xl border border-slate-200/80 p-5 flex items-center gap-4 shadow-sm">
+                          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+                            <i className="fa-solid fa-user-group text-xl"></i>
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400 font-bold block">オンラインメンバー</span>
+                            <span className="text-2xl font-black text-emerald-600">{roomMembers.length} <span className="text-xs text-slate-400 font-normal">人</span></span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 活動履歴（リアルタイム共同ログ） */}
+                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+                        <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                          <i className="fa-solid fa-wave-square text-indigo-600 animate-pulse"></i>
+                          リアルタイム活動ログ
+                        </h3>
+
+                        <div className="space-y-3.5 max-h-60 overflow-y-auto custom-scrollbar pr-2">
+                          {activityLog.length === 0 ? (
+                            <div className="text-center py-6 text-slate-400 text-xs">
+                              まだ活動履歴はありません。問題を登録してみましょう！
+                            </div>
+                          ) : (
+                            activityLog.map((log) => (
+                              <div key={log.id} className="flex items-start justify-between gap-4 text-xs">
+                                <div className="flex gap-2.5">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 flex-shrink-0"></div>
+                                  <div>
+                                    <span className="font-semibold text-slate-800">{log.user}:</span>{' '}
+                                    <span className="text-slate-600">{log.text}</span>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] text-slate-400 flex-shrink-0">
+                                  {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                    </div>
+                  )}
+
+                  {/* --- 2. 問題一覧・作成タブ --- */}
+                  {activeTab === 'questions' && (
+                    <div className="space-y-4">
+                      
+                      {/* 上部アクションバー */}
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900">問題一覧・管理</h2>
+                          <p className="text-xs text-slate-500">作成した問題はいつでも編集・削除でき、他の人にも共有されます。</p>
+                        </div>
+
+                        <button
+                          onClick={() => setIsCreateModalOpen(true)}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow"
+                        >
+                          <i className="fa-solid fa-plus"></i>
+                          新しい問題を作成
+                        </button>
+                      </div>
+
+                      {/* 問題カードリスト */}
+                      {questions.length === 0 ? (
+                        <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl py-12 px-4 text-center">
+                          <div className="inline-flex items-center justify-center w-12 h-12 bg-slate-100 rounded-full text-slate-400 mb-3">
+                            <i className="fa-solid fa-folder-open text-lg"></i>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-600 mb-1">問題が登録されていません</p>
+                          <p className="text-xs text-slate-400 mb-4">右上のボタンから最初の問題を作成してみましょう！</p>
+                          <button
+                            onClick={() => setIsCreateModalOpen(true)}
+                            className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-4 py-2 rounded-xl text-xs font-bold transition"
+                          >
+                            問題を作る
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {questions.map((q) => (
+                            <div key={q.id} className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col justify-between hover:border-slate-300 transition shadow-sm">
+                              
+                              <div>
+                                {/* タイプ＆作成者 */}
+                                <div className="flex items-center justify-between gap-2 mb-3">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                    q.type === 'choice' ? 'bg-indigo-50 text-indigo-700' :
+                                    q.type === 'ox' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+                                  }`}>
+                                    {q.type === 'choice' && '4択問題'}
+                                    {q.type === 'ox' && '○×判定'}
+                                    {q.type === 'text' && '記述・穴埋め'}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">
+                                    作成: <strong className="text-slate-600">{q.creator}</strong>
+                                  </span>
+                                </div>
+
+                                {/* 本文 */}
+                                <h3 className="text-sm font-bold text-slate-900 mb-3 line-clamp-2">
+                                  {q.title}
+                                </h3>
+
+                                {/* 解答プレビュー */}
+                                <div className="bg-slate-50 border border-slate-100/80 rounded-lg p-2.5 mb-3 text-xs">
+                                  <div className="text-slate-500 mb-1">正解:</div>
+                                  <div className="font-semibold text-emerald-600 truncate">{q.correctAnswer}</div>
+                                </div>
+                              </div>
+
+                              {/* ボトムバー・操作 */}
+                              <div className="border-t border-slate-100 pt-3 mt-2 flex items-center justify-between text-xs text-slate-400">
+                                <span className="flex items-center gap-1 text-[11px]">
+                                  <i className="fa-solid fa-redo"></i>
+                                  復習サイクル: {q.intervalDays}日ごと
+                                </span>
+                                
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleDeleteQuestion(q.id, q.title)}
+                                    className="text-slate-400 hover:text-rose-600 p-1 transition"
+                                    title="削除"
+                                  >
+                                    <i className="fa-solid fa-trash-can"></i>
+                                  </button>
+                                </div>
+                              </div>
+
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
+                  {/* --- 3. 今日の復習・リマインダータブ --- */}
+                  {activeTab === 'reminders' && (
+                    <div className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">本日の復習タスク</h2>
+                        <p className="text-xs text-slate-500">
+                          忘却曲線理論（1日後、3日後、7日後...）に基づいて、あなたの復習が必要な問題を抽出しています。
+                        </p>
+                      </div>
+
+                      {reviewRequiredQuestions.length === 0 ? (
+                        <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center">
+                          <div className="inline-flex items-center justify-center w-12 h-12 bg-emerald-50 rounded-full text-emerald-500 mb-3">
+                            <i className="fa-solid fa-circle-check text-xl"></i>
+                          </div>
+                          <p className="text-sm font-semibold text-slate-700 mb-1">今日の復習はすべてクリアです！</p>
+                          <p className="text-xs text-slate-400">素晴らしい学習ペースです。また明日確認しましょう。</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {reviewRequiredQuestions.map((q) => (
+                            <div key={q.id} className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-700 font-bold">
+                                    復習間隔: {q.intervalDays}日
+                                  </span>
+                                  <span className="text-xs text-slate-400">
+                                    作成者: {q.creator}
+                                  </span>
+                                </div>
+                                <h3 className="text-sm font-bold text-slate-800">{q.title}</h3>
+                              </div>
+
+                              <div className="flex gap-2 flex-shrink-0">
+                                <button
+                                  onClick={() => markAsReviewed(q.id, false)}
+                                  className="border border-rose-200 bg-rose-50/50 hover:bg-rose-50 text-rose-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+                                >
+                                  まだ未習得 (翌日復習)
+                                </button>
+                                <button
+                                  onClick={() => markAsReviewed(q.id, true)}
+                                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
+                                >
+                                  覚えている (次回倍の間隔)
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className="text-center py-8">
-                      <h3 className="text-2xl font-black mb-2">クイズ完了！</h3>
-                      <p className="text-sm text-slate-500 mb-6">正解数: {quizResults.filter(r => r.isCorrect).length} / {questions.length}</p>
-                      <button onClick={() => setQuizActive(false)} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-sm font-bold">ダッシュボードへ戻る</button>
-                    </div>
                   )}
-                </div>
-              ) : (
-                <div>
-                  {activeTab === 'dashboard' && (
-                    <div className="space-y-6">
-                      <div className="bg-gradient-to-r from-indigo-600 to-purple-800 rounded-3xl text-white p-6 shadow-xl">
-                        <h2 className="text-2xl font-black mb-2">友達と問題を共有して学ぼう</h2>
-                        <p className="text-sm opacity-90 mb-6">作成した問題は即座にルーム内の全員に自動同期されます。</p>
-                        <div className="flex gap-3">
-                          <button onClick={() => setIsCreateModalOpen(true)} className="bg-white text-indigo-900 px-4 py-2 rounded-xl text-xs font-bold shadow"><i className="fa-solid fa-plus mr-1"></i>問題作成</button>
-                          <button onClick={startQuiz} className="bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow"><i className="fa-solid fa-play mr-1"></i>クイズ開始</button>
-                        </div>
+
+                  {/* --- 4. メンバータブ --- */}
+                  {activeTab === 'members' && (
+                    <div className="space-y-4">
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">ルームのメンバー一覧</h2>
+                        <p className="text-xs text-slate-500">このルーム ID <strong>{groupId}</strong> を共有して、一緒に勉強しましょう！</p>
                       </div>
 
-                      <div className="bg-white rounded-2xl border p-5 shadow-sm">
-                        <h3 className="text-sm font-bold mb-4"><i className="fa-solid fa-wave-square text-indigo-600 mr-2"></i>活動ログ</h3>
-                        <div className="space-y-3 max-h-48 overflow-y-auto custom-scrollbar">
-                          {activityLog.length === 0 ? <p className="text-xs text-slate-400">
+                      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                          参加中のユーザー ({roomMembers.length})
+                        </div>
+                        <ul className="divide-y divide-slate-100">
+                          {roomMembers.map((member) => (
+                            <li key={member.id} className="p-4 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm">
+                                  {(member.name || 'U').substring(0, 1)}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-slate-800">
+                                    {member.name} 
+                                    {member.uid === user?.uid && <span className="text-[10px] ml-1.5 bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">あなた</span>}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400">UID: {member.uid}</p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                アクティブ
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* 招待説明 */}
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 text-indigo-900 space-y-3">
+                        <h4 className="text-sm font-bold flex items-center gap-1.5">
+                          <i className="fa-solid fa-share-nodes"></i>
+                          友達を招待する方法
+                        </h4>
+                        <p className="text-xs leading-relaxed">
+                          このルームで友達と一緒に学習する手順はとても簡単です！
+                        </p>
+                        <ol className="text-xs list-decimal list-inside space-y-1.5 text-indigo-950">
+                          <li>上の <strong>「招待リンク」</strong> ボタンを押して専用URLをコピー。</li>
+                          <li>LINEやDiscordなどで友達にURLを送る。</li>
+                          <li>友達がアクセスすると、自動的にこの <strong>{groupId}</strong> ルームに参加して、リアルタイムで問題を共有できます。</li>
+                        </ol>
+                      </div>
+
+                    </div>
+                  )}
+
+                </div>
+              )}
+
+            </div>
+          </main>
+
+          {/* --- 新規問題追加モーダル --- */}
+          {isCreateModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] flex flex-col justify-between">
+                
+                {/* ヘッダー */}
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <i className="fa-solid fa-plus text-indigo-600"></i>
+                    新しい問題を作成
+                  </h3>
+                  <button 
+                    onClick={() => setIsCreateModalOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 transition"
+                  >
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                {/* フォームボディ（スクロール対応） */}
+                <form onSubmit={handleCreateQuestion} className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-1 pb-4">
+                  
+                  {/* 問題タイプ */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-2">問題の形式</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setQType('choice')}
+                        className={`py-2 px-3 rounded-lg border text-xs font-bold transition ${
+                          qType === 'choice' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <i className="fa-solid fa-list-ol mr-1"></i>
+                        4択問題
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQType('ox')}
+                        className={`py-2 px-3 rounded-lg border text-xs font-bold transition ${
+                          qType === 'ox' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <i className="fa-solid fa-check-double mr-1"></i>
+                        ○×判定
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQType('text')}
+                        className={`py-2 px-3 rounded-lg border text-xs font-bold transition ${
+                          qType === 'text' ? 'bg-indigo-50 border-indigo-500 text-indigo-700' : 'border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <i className="fa-solid fa-keyboard mr-1"></i>
+                        記述式
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 問題本文 */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">問題の内容・問いかけ</label>
+                    <textarea
+                      required
+                      rows="3"
+                      className="w-full px-4 py-2 text-sm border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition"
+                      placeholder="例: 日本で最も標高の高い、山梨県と静岡県にまたがる山は何？"
+                      value={qTitle}
+                      onChange={(e) => setQTitle(e.target.value)}
+                    ></textarea>
+                  </div>
+
+                  {/* 回答の入力（タイプ毎に分岐） */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">解答の設定</label>
+
+                    {/* 4択オプション */}
+                    {qType === 'choice' && (
+                      <div className="space-y-2">
+                        {qOptions.map((opt, oIdx) => (
+                          <div key={oIdx} className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name="correctChoice"
+                              checked={qCorrectChoice === oIdx}
+                              onChange={() => setQCorrectChoice(oIdx)}
+                              className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                            />
+                            <input
+                              type="text"
+                              required={oIdx < 2} // 最低2つの選択肢は必須
+                              placeholder={`選択肢 ${oIdx + 1} ${oIdx >= 2 ? '(任意)' : ''}`}
+                              className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded-lg outline-none focus:border-indigo-500"
+                              value={opt}
+                              onChange={(e) => {
+                                const newOpts = [...qOptions];
+                                newOpts[oIdx] = e.target.value;
+                                setQOptions(newOpts);
+                              }}
+                            />
+                          </div>
+                        ))}
+                        <p className="text-[10px] text-slate-400 mt-1">※ ラジオボタンを選択しているものが「正解」となります。</p>
+                      </div>
+                    )}
+
+                    {/* OX判定 */}
+                    {qType === 'ox' && (
+                      <div className="flex gap-4">
+                        <button
+                          type="button"
+                          onClick={() => setQCorrectOx('O')}
+                          className={`flex-1 py-3 border-2 rounded-xl font-bold transition flex flex-col items-center justify-center ${
+                            qCorrectOx === 'O' ? 'bg-emerald-50 border-emerald-500 text-emerald-800' : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-xl">O</span>
+                          <span className="text-[10px]">正しい</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQCorrectOx('X')}
+                          className={`flex-1 py-3 border-2 rounded-xl font-bold transition flex flex-col items-center justify-center ${
+                            qCorrectOx === 'X' ? 'bg-rose-50 border-rose-500 text-rose-800' : 'border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="text-xl">X</span>
+                          <span className="text-[10px]">誤り</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 記述式 */}
+                    {qType === 'text' && (
+                      <input
+                        type="text"
+                        required
+                        placeholder="模範解答を入力してください (例: 富士山)"
+                        className="w-full px-4 py-2 text-xs border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                        value={qCorrectText}
+                        onChange={(e) => setQCorrectText(e.target.value)}
+                      />
+                    )}
+                  </div>
+
+                  {/* 解説（任意） */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">解説 (任意)</label>
+                    <textarea
+                      rows="2"
+                      className="w-full px-4 py-2 text-xs border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition"
+                      placeholder="正解の背景や豆知識など、回答後に表示される解説文です。"
+                      value={qExplanation}
+                      onChange={(e) => setQExplanation(e.target.value)}
+                    ></textarea>
+                  </div>
+
+                  {/* リマインダー間隔 */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">初期復習スパン</label>
+                    <select
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg outline-none bg-white focus:border-indigo-500"
+                      value={qInterval}
+                      onChange={(e) => setQInterval(e.target.value)}
+                    >
+                      <option value="1">1日（短期定着 - 毎日復習が必要）</option>
+                      <option value="3">3日（基本セット）</option>
+                      <option value="7">7日（一週間おき - 中長期ターゲット）</option>
+                    </select>
+                  </div>
+
+                  {/* フッター・送信 */}
+                  <div className="flex gap-2 justify-end pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setIsCreateModalOpen(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 rounded-lg transition"
+                    >
+                      キャンセル
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow transition"
+                    >
+                      問題を作成して共有
+                    </button>
+                  </div>
+
+                </form>
+
+              </div>
+            </div>
+          )}
+
+          {/* フッター */}
+          <footer className="bg-white border-t border-slate-200 py-6 px-4 mt-auto">
+            <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+              <p>&copy; 2026 ShareQ. 友達と一緒に解いて覚える、忘却曲線リマインダーシステム。</p>
+              <div className="flex gap-4">
+                <span className="hover:text-slate-600 cursor-pointer">利用規約</span>
+                <span className="hover:text-slate-600 cursor-pointer">プライバシーポリシー</span>
+              </div>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(React.createElement(App));
+  </script>
+
+  <!-- React マウント用ベースコンテナ -->
+  <div id="root">
+    <!-- ローディング時の一時表示 -->
+    <div class="min-h-screen flex items-center justify-center bg-slate-50">
+      <div class="text-center space-y-4">
+        <div class="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        <p class="text-sm text-slate-500 font-medium">アプリケーションを起動中...</p>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
