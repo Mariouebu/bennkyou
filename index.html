@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShareQ - AI採点＆質問・ルーム＆リマインダー完全版</title>
+  <title>ShareQ - AI採点＆セキュリティ管理画面付き</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -50,16 +50,13 @@
       firebaseInitialized = true;
     } catch (e) { console.error(e); }
 
-    // --- 超軽量・Gemini AI無料呼び出し関数 ---
+    // --- Gemini AI無料呼び出し関数 ---
     async function askAI(promptText) {
       try {
-        // 無料で使えるAPIエンドポイントと汎用キーを使用
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${firebaseConfig.apiKey}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: promptText }] }]
-          })
+          body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
         });
         const data = await response.json();
         return data.candidates[0].content.parts[0].text;
@@ -71,36 +68,39 @@
 
     const { useState, useEffect } = React;
 
+    // 🔒 管理者用ログインパスワード（ここを書き換えることで自由に変更できます）
+    const ADMIN_PASSWORD = "Haya1012";
+
     function App() {
       const [user, setUser] = useState(null);
       const [activeTab, setActiveTab] = useState('dashboard');
       const [questions, setQuestions] = useState([]);
       const [reminders, setReminders] = useState([]);
-      const [adminQuestions, setAdminQuestions] = useState([]); // 管理者へ送られた質問
+      const [adminQuestions, setAdminQuestions] = useState([]);
       
+      // 管理者ログイン状態の管理
+      const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+      const [passwordInput, setPasswordInput] = useState('');
+      const [loginError, setLoginError] = useState('');
+
       // ルーム＆選択状態
       const [currentRoom, setCurrentRoom] = useState(null);
       const [roomInput, setRoomInput] = useState('');
-      const [selectedAnswers, setSelectedAnswers] = useState({}); // ユーザーの選択回答
-      const [aiExplanations, setAiExplanations] = useState({}); // 各問題のAI解説
+      const [selectedAnswers, setSelectedAnswers] = useState({});
+      const [aiExplanations, setAiExplanations] = useState({});
       const [aiLoading, setAiLoading] = useState({});
 
-      // 新規問題フォーム状態
+      // 各種フォーム
       const [title, setTitle] = useState('');
       const [type, setType] = useState('choice');
       const [options, setOptions] = useState(['', '', '', '']);
       const [correctAnswer, setCorrectAnswer] = useState('');
-      
-      // リマインダーフォーム状態
       const [remText, setRemText] = useState('');
       const [remTime, setRemTime] = useState('');
       const [editingRemId, setEditingRemId] = useState(null);
-
-      // AI質問箱の状態
       const [userQuestion, setUserQuestion] = useState('');
       const [aiChatResponse, setAiChatResponse] = useState('');
       const [chatLoading, setChatLoading] = useState(false);
-      const [escalatedMessage, setEscalatedMessage] = useState('');
 
       useEffect(() => {
         if (firebaseInitialized && auth) {
@@ -114,7 +114,6 @@
               onSnapshot(query(collection(db, "reminders"), orderBy("time", "asc")), (snap) => {
                 setReminders(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
-              // 管理者向けにエスカレートされた質問のリアルタイム同期
               onSnapshot(query(collection(db, "admin_escalations"), orderBy("createdAt", "desc")), (snap) => {
                 setAdminQuestions(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
@@ -122,6 +121,24 @@
           });
         }
       }, []);
+
+      // 管理者ログイン試行
+      const handleAdminLogin = (e) => {
+        e.preventDefault();
+        if (passwordInput === ADMIN_PASSWORD) {
+          setIsAdminAuthenticated(true);
+          setLoginError('');
+          setPasswordInput('');
+        } else {
+          setLoginError('❌ パスワードが正しくありません。');
+        }
+      };
+
+      // 管理者ログアウト
+      const handleAdminLogout = () => {
+        setIsAdminAuthenticated(false);
+        setActiveTab('dashboard');
+      };
 
       // 問題追加
       const handleSubmit = async (e) => {
@@ -138,11 +155,10 @@
         setActiveTab('questions');
       };
 
-      // AIによる自動採点＆解説の生成
+      // AI採点
       const handleAnswerQuiz = async (qId, selectedOpt, correctOpt) => {
         setSelectedAnswers(prev => ({ ...prev, [qId]: selectedOpt }));
         setAiLoading(prev => ({ ...prev, [qId]: true }));
-
         const targetQuestion = questions.find(q => q.id === qId);
         const isCorrect = String(selectedOpt) === String(correctOpt);
 
@@ -152,51 +168,37 @@
           生徒の回答: "${selectedOpt}"
           正しい正解: "${correctOpt}"
           結果: ${isCorrect ? "正解" : "不正解"}
-
-          生徒に向けて、なぜこの答えになるのかの詳しい「解説」と、関連する「楽しく学べる豆知識」を200文字程度で優しく教えてあげてください。
+          生徒に向けて解説と、楽しく学べる豆知識を200文字程度で優しく教えてあげてください。
         `;
-
         const explanation = await askAI(aiPrompt);
         setAiExplanations(prev => ({ ...prev, [qId]: explanation }));
         setAiLoading(prev => ({ ...prev, [qId]: false }));
       };
 
-      // AI質問箱の処理（答えられない場合は管理者へ）
+      // AI質問箱
       const handleAskAIBox = async (e) => {
         e.preventDefault();
         if (!userQuestion.trim()) return;
-        setChatLoading(true);
-        setAiChatResponse('');
-        setEscalatedMessage('');
+        setChatLoading(true); setAiChatResponse('');
 
-        // 特殊なプロンプトで、AIが回答可能か判定させる
         const aiPrompt = `
-          ユーザーから学習に関する質問を受けました。
-          質問: "${userQuestion}"
-
-          【ルール】
-          もしこの質問が高度すぎる、専門外である、またはあなた(AI)が「正確に答えられない・わからない」と判断した場合は、必ず文章の最初に「【管理者エスカレーション】」とだけ書いて改行し、その後ろに管理者へ送るための理由を書いてください。
-          普通に答えられる場合は、親切に回答を教えてください。
+          ユーザーから学習に関する質問を受けました。 質問: "${userQuestion}"
+          【ルール】 もしこの質問が高度すぎる、専門外である、またはあなた(AI)が「正確に答えられない・わからない」と判断した場合は、必ず文章の最初に「【管理者エスカレーション】」とだけ書いて改行し、その後ろに管理者へ送るための理由を書いてください。 普通に答えられる場合は、親切に回答を教えてください。
         `;
-
         const response = await askAI(aiPrompt);
         
         if (response.includes("【管理者エスカレーション】")) {
-          // Firebaseの管理者用コレクションに送信
           await addDoc(collection(db, "admin_escalations"), {
-            question: userQuestion,
-            status: "未対応",
-            createdAt: new Date().toISOString()
+            question: userQuestion, status: "未対応", createdAt: new Date().toISOString()
           });
           setAiChatResponse("🤖 AI判定: 「この質問は少し難しいため、正確な回答のために管理者の先生にバトンタッチしました！管理画面に送信されました。」");
-          setEscalatedMessage("この質問は管理者画面へ転送されました。");
         } else {
           setAiChatResponse(response);
         }
         setChatLoading(false);
       };
 
-      // リマインダー処理
+      // リマインダー
       const handleReminderSubmit = async (e) => {
         e.preventDefault();
         if (!remText.trim() || !remTime) return;
@@ -238,7 +240,7 @@
 
             <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[400px]">
               
-              {/* タブ1: ダッシュボード */}
+              {/* ダッシュボード */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
                   <div>
@@ -264,7 +266,7 @@
                 </div>
               )}
 
-              {/* タブ2: 問題の新規作成 */}
+              {/* 問題の新規作成 */}
               {activeTab === 'create' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-slate-900">新しい問題の作成 {currentRoom && `(Room: ${currentRoom})`}</h2>
@@ -280,7 +282,6 @@
                         <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={type === 'boolean'} onChange={() => setType('boolean')} /> ○✕問題</label>
                       </div>
                     </div>
-
                     {type === 'choice' ? (
                       <div className="space-y-3">
                         <label className="block text-sm font-semibold text-slate-700">選択肢</label>
@@ -302,7 +303,7 @@
                 </div>
               )}
 
-              {/* タブ3: 問題一覧 ＆ AI採点 */}
+              {/* 問題一覧 ＆ AI採点 */}
               {activeTab === 'questions' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-slate-900">問題一覧とAI即時採点</h2>
@@ -311,13 +312,9 @@
                       <div key={q.id} className="p-5 border border-slate-200 rounded-2xl bg-slate-50/50">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border mb-2 inline-block">{q.type === 'choice' ? '4択クイズ' : '○✕問題'}</span>
                         <h4 className="font-bold text-slate-800 text-base mb-3">{q.title}</h4>
-                        
-                        {/* 回答ボタン */}
                         <div className="grid grid-cols-2 gap-2">
                           {q.type === 'choice' ? q.options.map((opt, idx) => (
-                            <button key={idx} onClick={() => handleAnswerQuiz(q.id, opt, q.correctAnswer)} className={`p-3 rounded-xl text-xs text-left border font-medium ${selectedAnswers[q.id] === opt ? 'bg-indigo-600 text-white' : 'bg-white hover:bg-slate-100'}`}>
-                              {opt}
-                            </button>
+                            <button key={idx} onClick={() => handleAnswerQuiz(q.id, opt, q.correctAnswer)} className={`p-3 rounded-xl text-xs text-left border font-medium ${selectedAnswers[q.id] === opt ? 'bg-indigo-600 text-white' : 'bg-white hover:bg-slate-100'}`}>{opt}</button>
                           )) : (
                             <>
                               <button onClick={() => handleAnswerQuiz(q.id, 'true', q.correctAnswer)} className={`p-3 rounded-xl text-xs border font-medium ${selectedAnswers[q.id] === 'true' ? 'bg-indigo-600 text-white' : 'bg-white'}`}>⭕ ○</button>
@@ -325,25 +322,14 @@
                             </>
                           )}
                         </div>
-
-                        {/* AI採点結果 ＆ リアルタイム解説 */}
                         {selectedAnswers[q.id] && (
                           <div className="mt-4 p-4 rounded-xl border bg-white space-y-2">
                             <div className="flex items-center gap-2">
-                              {String(selectedAnswers[q.id]) === String(q.correctAnswer) ? (
-                                <span className="text-emerald-600 font-bold text-sm">⭕ 正解！</span>
-                              ) : (
-                                <span className="text-rose-500 font-bold text-sm">❌ 残念、不正解... (正解: {String(q.correctAnswer) === 'true' ? '○' : String(q.correctAnswer) === 'false' ? '✕' : q.correctAnswer})</span>
-                              )}
+                              {String(selectedAnswers[q.id]) === String(q.correctAnswer) ? <span className="text-emerald-600 font-bold text-sm">⭕ 正解！</span> : <span className="text-rose-500 font-bold text-sm">❌ 不正解 (正解: {String(q.correctAnswer) === 'true' ? '○' : String(q.correctAnswer) === 'false' ? '✕' : q.correctAnswer})</span>}
                             </div>
-                            
                             <div className="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg border border-dashed">
                               <p className="font-bold text-indigo-600 mb-1">💡 AIの解説・アドバイス:</p>
-                              {aiLoading[q.id] ? (
-                                <p className="animate-pulse"><i className="fa-solid fa-spinner animate-spin"></i> AIが解説を考えています...</p>
-                              ) : (
-                                <p className="leading-relaxed whitespace-pre-line">{aiExplanations[q.id]}</p>
-                              )}
+                              {aiLoading[q.id] ? <p className="animate-pulse"><i className="fa-solid fa-spinner animate-spin"></i> 解説作成中...</p> : <p className="leading-relaxed whitespace-pre-line">{aiExplanations[q.id]}</p>}
                             </div>
                           </div>
                         )}
@@ -353,66 +339,102 @@
                 </div>
               )}
 
-              {/* タブ4: AI質問箱 (自動判定エスカレーション付き) */}
+              {/* AI質問箱 */}
               {activeTab === 'ai-chat' && (
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">🧠 AI質問箱</h2>
-                    <p className="text-slate-500 text-sm">勉強の疑問を何でも質問してください。AIが答えられない場合は自動で管理者の先生へ送信されます。</p>
+                    <p className="text-slate-500 text-sm">勉強の疑問を質問してください。AIが降参した内容は自動で管理者の先生へ送信されます。</p>
                   </div>
                   <form onSubmit={handleAskAIBox} className="space-y-3">
-                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力してください (例: なぜ三角比のサイン・コサインは必要なのですか？)" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
-                    <button type="submit" disabled={chatLoading} className="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md w-full sm:w-auto">
-                      {chatLoading ? '🤖 AIが思考中...' : 'AIに質問する'}
-                    </button>
+                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力 (例: なぜ光は1秒間に地球を7周半も進めるの？)" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
+                    <button type="submit" disabled={chatLoading} className="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md w-full sm:w-auto">{chatLoading ? '🤖 思考中...' : 'AIに質問する'}</button>
                   </form>
-
                   {aiChatResponse && (
                     <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-xl space-y-2">
-                      <p className="text-xs font-bold text-indigo-700">🤖 AIからの回答:</p>
+                      <p className="text-xs font-bold text-indigo-700">🤖 回答:</p>
                       <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{aiChatResponse}</p>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* タブ5: 管理画面 (シミュレーター) */}
+              {/* 🔒 タブ5: 管理画面（認証ガードロック付き） */}
               {activeTab === 'admin' && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-xl font-bold text-rose-700"><i className="fa-solid fa-shield-halved mr-1.5"></i>管理者用コントロールパネル</h2>
-                    <p className="text-slate-500 text-sm">AIが回答不可能と自動判断し、ここにエスカレーションされてきた質問の一覧です。</p>
-                  </div>
-                  <div className="space-y-3">
-                    {adminQuestions.length === 0 ? (
-                      <p className="text-sm text-slate-400 py-4 text-center border-2 border-dashed rounded-xl">現在、管理者対応が必要な質問はありません。</p>
-                    ) : (
-                      adminQuestions.map(aq => (
-                        <div key={aq.id} className="p-4 border-2 border-rose-100 rounded-xl bg-rose-50/30 space-y-2">
-                          <div className="flex justify-between text-xs text-slate-400 font-mono">
-                            <span>ステータス: <strong className="text-rose-600">{aq.status}</strong></span>
-                            <span>{aq.createdAt?.substring(0,10)}</span>
-                          </div>
-                          <p className="text-sm font-bold text-slate-800">🤔 ユーザーからの未回答質問:</p>
-                          <p className="bg-white p-3 rounded-lg border text-sm text-slate-700 shadow-sm font-medium">「 {aq.question} 」</p>
-                          <div className="flex justify-end gap-2">
-                            <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg">解決済みにする</button>
-                            <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-500 hover:text-rose-600 text-xs font-bold px-2 py-1.5">削除</button>
-                          </div>
+                <div>
+                  {!isAdminAuthenticated ? (
+                    /* パスワード入力フォーム（未認証の場合） */
+                    <div className="max-w-md mx-auto py-12 space-y-6 text-center">
+                      <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner">
+                        <i className="fa-solid fa-lock"></i>
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-900">管理者認証が必要です</h2>
+                        <p className="text-slate-400 text-xs mt-1">コントロールパネルを開くにはパスワードを入力してください。</p>
+                      </div>
+                      <form onSubmit={handleAdminLogin} className="space-y-3">
+                        <input 
+                          type="password" 
+                          value={passwordInput} 
+                          onChange={e => setPasswordInput(e.target.value)} 
+                          placeholder="パスワードを入力してください" 
+                          className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800"
+                          required
+                        />
+                        {loginError && <p className="text-xs text-rose-500 font-medium">{loginError}</p>}
+                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl hover:bg-slate-900 shadow-md text-sm transition-all">
+                          ロックを解除
+                        </button>
+                      </form>
+                      <p className="text-[10px] text-slate-300">※初期設定パスワードは「admin1234」です</p>
+                    </div>
+                  ) : (
+                    /* 本番の管理画面パネル（認証に成功している場合のみ表示） */
+                    <div className="space-y-6">
+                      <div className="flex justify-between items-start border-b pb-4">
+                        <div>
+                          <h2 className="text-xl font-bold text-rose-700 flex items-center gap-2">
+                            <i className="fa-solid fa-shield-halved"></i>管理者用コントロールパネル
+                          </h2>
+                          <p className="text-slate-500 text-sm mt-0.5">AIがバトンタッチした「未回答の質問リスト」をリアルタイムに管理できます。</p>
                         </div>
-                      ))
-                    )}
-                  </div>
+                        <button onClick={handleAdminLogout} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">
+                          <i className="fa-solid fa-right-from-bracket mr-1"></i> ログアウト
+                        </button>
+                      </div>
+
+                      <div className="space-y-3">
+                        {adminQuestions.length === 0 ? (
+                          <p className="text-sm text-slate-400 py-8 text-center border-2 border-dashed rounded-xl">現在、対応が必要なエスカレーションはありません。</p>
+                        ) : (
+                          adminQuestions.map(aq => (
+                            <div key={aq.id} className="p-4 border-2 border-rose-100 rounded-xl bg-rose-50/20 space-y-2">
+                              <div className="flex justify-between text-xs text-slate-400 font-mono">
+                                <span>ステータス: <strong className="text-rose-600">{aq.status}</strong></span>
+                                <span>{aq.createdAt?.substring(0,16).replace('T', ' ')}</span>
+                              </div>
+                              <p className="text-sm font-bold text-slate-800">🤔 ユーザーからの質問:</p>
+                              <p className="bg-white p-3 rounded-lg border text-sm text-slate-700 shadow-sm font-medium">「 {aq.question} 」</p>
+                              <div className="flex justify-end gap-2 pt-1">
+                                <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all">対応完了（解決済みにする）</button>
+                                <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1.5 transition-all">履歴を削除</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* タブ6: ルーム機能 */}
+              {/* ルーム機能 */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-slate-900">ルーム会議室</h2>
                   {!currentRoom ? (
                     <div className="bg-slate-50 p-6 rounded-2xl border text-center space-y-4">
-                      <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="ルーム名を入力 (例: team-a)" className="px-4 py-2 rounded-xl border text-center font-bold" />
+                      <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="ルーム名を入力" className="px-4 py-2 rounded-xl border text-center font-bold" />
                       <button onClick={() => { if(roomInput.trim()){setCurrentRoom(roomInput.trim()); setRoomInput('');} }} className="bg-indigo-600 text-white font-bold py-2 px-6 rounded-xl block mx-auto">入室する</button>
                     </div>
                   ) : (
