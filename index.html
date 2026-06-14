@@ -4,1019 +4,396 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ShareQ - 友達と問題作成・リマインダー</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
   <style>
     body {
       font-family: 'Plus Jakarta Sans', 'Noto Sans JP', sans-serif;
     }
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: #cbd5e1;
-      border-radius: 4px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-      background: #94a3b8;
-    }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col antialiased">
+<body class="bg-slate-50 text-slate-800 min-h-screen">
 
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"
+      }
+    }
+  </script>
+
   <script type="text/babel" data-type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { initializeApp } from "firebase/app";
+    import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "firebase/firestore";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-    const { useState, useEffect, useRef, useMemo } = React;
+    // --- Firebase 設定 (ご自身のキーに書き換えてください) ---
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY_HERE",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "YOUR_SENDER_ID",
+      appId: "YOUR_APP_ID"
+    };
 
-    // --- Firebase環境設定 ---
-    const firebaseConfig = typeof __firebase_config !== 'undefined' 
-      ? JSON.parse(__firebase_config) 
-      : {
-          apiKey: "",
-          authDomain: "mock-project.firebaseapp.com",
-          projectId: "mock-project",
-          storageBucket: "mock-project.appspot.com",
-          messagingSenderId: "123456789",
-          appId: "1:123456789:web:abcdef"
-        };
+    // グローバル変数の宣言
+    let db = null;
+    let auth = null;
+    let firebaseInitialized = false;
 
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'share-q-app-id';
+    // 白画面対策：Firebaseの初期化に失敗してもReactがクラッシュしないようにガード
+    try {
+      if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+        firebaseInitialized = true;
+        console.log("Firebase initialized successfully.");
+      } else {
+        console.warn("Firebase config is placeholder. Running in Offline Mock Mode.");
+      }
+    } catch (error) {
+      console.error("Firebase initialization failed:", error);
+    }
+
+    // React Hooks の取得
+    const { useState, useEffect } = React;
 
     function App() {
-      // --- 状態管理 ---
+      // 状態管理
       const [user, setUser] = useState(null);
-      const [username, setUsername] = useState('');
-      const [isSettingUsername, setIsSettingUsername] = useState(false);
-      const [activeTab, setActiveTab] = useState('dashboard'); 
-      
-      // グループ管理
-      const [groupId, setGroupId] = useState('default-room');
-      const [joinRoomInput, setJoinRoomInput] = useState('');
-      const [copySuccess, setCopySuccess] = useState(false);
-
-      // データリスト（Firestoreから同期）
+      const [activeTab, setActiveTab] = useState('dashboard');
       const [questions, setQuestions] = useState([]);
-      const [activityLog, setActivityLog] = useState([]);
-      const [roomMembers, setRoomMembers] = useState([]);
+      const [loading, setLoading] = useState(false);
+      
+      // 新規問題フォームの状態
+      const [title, setTitle] = useState('');
+      const [type, setType] = useState('choice');
+      const [options, setOptions] = useState(['', '', '', '']);
+      const [correctAnswer, setCorrectAnswer] = useState('');
 
-      // モーダル・フォーム状態
-      const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-      const [qType, setQType] = useState('choice'); 
-      const [qTitle, setQTitle] = useState('');
-      const [qOptions, setQOptions] = useState(['', '', '', '']);
-      const [qCorrectChoice, setQCorrectChoice] = useState(0);
-      const [qCorrectOx, setQCorrectOx] = useState('O (正しい)');
-      const [qCorrectText, setQCorrectText] = useState('');
-      const [qExplanation, setQExplanation] = useState('');
-      const [qInterval, setQInterval] = useState('1'); 
-
-      // クイズ実行状態
-      const [quizActive, setQuizActive] = useState(false);
-      const [quizIndex, setQuizIndex] = useState(0);
-      const [selectedAnswer, setSelectedAnswer] = useState(null);
-      const [textAnswer, setTextAnswer] = useState('');
-      const [quizResults, setQuizResults] = useState([]); 
-      const [quizFinished, setQuizFinished] = useState(false);
-
-      // 通知トースト
-      const [toast, setToast] = useState(null);
-
-      const showToast = (message, type = 'success') => {
-        setToast({ message, type });
-        setTimeout(() => setToast(null), 3000);
-      };
-
-      // --- Firebase 認証初期化 ---
+      // 1. ログイン処理 (Firebase or ゲスト)
       useEffect(() => {
-        const initAuth = async () => {
-          try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (err) {
-            console.error("Auth Error:", err);
-            showToast("認証に失敗しました。オフラインモードで実行します。", "error");
-          }
-        };
-        initAuth();
-
-        const unsubscribe = onAuthStateChanged(auth, (usr) => {
-          if (usr) {
-            setUser(usr);
-            const savedName = localStorage.getItem(`uname_${usr.uid}`);
-            setUsername(savedName || `ユーザー_${usr.uid.substring(0, 5)}`);
-          }
-        });
-        return () => unsubscribe();
-      }, []);
-
-      // ユーザー名のFirestore更新・保存
-      const handleSaveUsername = async () => {
-        if (!username.trim() || !user) return;
-        localStorage.setItem(`uname_${user.uid}`, username);
-        setIsSettingUsername(false);
-        showToast(`ユーザー名を 「${username}」 に設定しました！`);
-
-        if (groupId) {
-          try {
-            const memberDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', `${groupId}_${user.uid}`);
-            await setDoc(memberDocRef, {
-              uid: user.uid,
-              roomId: groupId,
-              name: username,
-              lastActive: Date.now()
-            }, { merge: true });
-            
-            await addActivity(`${username} が参加しました。`);
-          } catch (e) {
-            console.error(e);
-          }
-        }
-      };
-
-      // 共同アクティビティログの登録
-      const addActivity = async (actionText) => {
-        if (!user) return;
-        try {
-          const logCol = collection(db, 'artifacts', appId, 'public', 'data', 'activities');
-          await addDoc(logCol, {
-            roomId: groupId,
-            text: actionText,
-            user: username || user.uid.substring(0, 5),
-            timestamp: Date.now()
-          });
-        } catch (e) {
-          console.error("Error adding activity:", e);
-        }
-      };
-
-      // --- Firestore データ監視リアルタイム更新 ---
-      useEffect(() => {
-        if (!user || !groupId) return;
-
-        // 1. 問題データの取得
-        const qCollection = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
-        const unsubQuestions = onSnapshot(qCollection, (snapshot) => {
-          const list = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.roomId === groupId) {
-              list.push({ id: doc.id, ...data });
+        if (firebaseInitialized && auth) {
+          // 匿名ログインを実行
+          signInAnonymously(auth).catch(err => console.error("Auth error:", err));
+          
+          // ログイン状態の監視
+          const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            if (currentUser) {
+              setUser(currentUser);
+              fetchQuestions(currentUser.uid);
             }
           });
-          list.sort((a, b) => b.createdAt - a.createdAt);
-          setQuestions(list);
-        }, (err) => {
-          console.error("Questions load error", err);
-        });
-
-        // 2. メンバーリストの取得
-        const mCollection = collection(db, 'artifacts', appId, 'public', 'data', 'members');
-        const unsubMembers = onSnapshot(mCollection, (snapshot) => {
-          const list = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.roomId === groupId) {
-              list.push({ id: doc.id, ...data });
-            }
-          });
-          setRoomMembers(list);
-        }, (err) => console.error(err));
-
-        // 3. アクティビティログの取得
-        const aCollection = collection(db, 'artifacts', appId, 'public', 'data', 'activities');
-        const unsubActivities = onSnapshot(aCollection, (snapshot) => {
-          const list = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            if (data.roomId === groupId) {
-              list.push({ id: doc.id, ...data });
-            }
-          });
-          list.sort((a, b) => b.timestamp - a.timestamp);
-          setActivityLog(list.slice(0, 15)); 
-        }, (err) => console.error(err));
-
-        // 自身をメンバー登録
-        const registerMember = async () => {
-          const memberDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'members', `${groupId}_${user.uid}`);
-          await setDoc(memberDocRef, {
-            uid: user.uid,
-            roomId: groupId,
-            name: username || `ユーザー_${user.uid.substring(0, 5)}`,
-            lastActive: Date.now()
-          }, { merge: true });
-        };
-        registerMember();
-
-        return () => {
-          unsubQuestions();
-          unsubMembers();
-          unsubActivities();
-        };
-      }, [user, groupId, username]);
-
-      const handleJoinRoom = (e) => {
-        e.preventDefault();
-        if (!joinRoomInput.trim()) return;
-        const targetRoom = joinRoomInput.trim();
-        setGroupId(targetRoom);
-        showToast(`ルーム「${targetRoom}」に切り替えました。`);
-        setJoinRoomInput('');
-      };
-
-      const copyInviteLink = () => {
-        const textToCopy = `${window.location.origin}${window.location.pathname}?room=${groupId}`;
-        const tempInput = document.createElement('input');
-        tempInput.value = textToCopy;
-        document.body.appendChild(tempInput);
-        tempInput.select();
-        try {
-          document.execCommand('copy');
-          setCopySuccess(true);
-          showToast("招待用ルームID/リンクをコピーしました！");
-          setTimeout(() => setCopySuccess(false), 2000);
-        } catch (err) {
-          showToast("コピーに失敗しました", "error");
-        }
-        document.body.removeChild(tempInput);
-      };
-
-      useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const roomParam = params.get('room');
-        if (roomParam) {
-          setGroupId(roomParam);
-          showToast(`招待リンクからルーム 「${roomParam}」 に入室しました。`);
-        }
-      }, []);
-
-      // --- 問題作成処理 ---
-      const handleCreateQuestion = async (e) => {
-        e.preventDefault();
-        if (!qTitle.trim()) {
-          showToast("問題内容を入力してください。", "error");
-          return;
-        }
-
-        let correctAnswer = '';
-        let optionsList = [];
-
-        if (qType === 'choice') {
-          optionsList = qOptions.filter(opt => opt.trim() !== '');
-          if (optionsList.length < 2) {
-            showToast("選択肢は最低2つ以上入力してください。", "error");
-            return;
-          }
-          correctAnswer = qOptions[qCorrectChoice];
-        } else if (qType === 'ox') {
-          optionsList = ['O (正しい)', 'X (誤り)'];
-          correctAnswer = qCorrectOx;
+          return () => unsubscribe();
         } else {
-          correctAnswer = qCorrectText.trim();
-          if (!correctAnswer) {
-            showToast("正解のテキストを入力してください。", "error");
-            return;
-          }
+          // Firebaseがない場合はローカルの模擬ユーザー
+          setUser({ uid: "mock-user-123", isAnonymous: true });
+          setQuestions([
+            { id: "1", title: "サンプルのクイズ：日本で一番高い山は？", type: "choice", options: ["富士山", "北岳", "奥穂高岳", "間ノ岳"], correctAnswer: "富士山" }
+          ]);
         }
+      }, []);
+
+      // 2. 問題一覧の取得
+      const fetchQuestions = async (uid) => {
+        if (!firebaseInitialized || !db) return;
+        setLoading(true);
+        try {
+          const q = query(collection(db, "questions"), orderBy("createdAt", "desc"));
+          const querySnapshot = await getDocs(q);
+          const list = [];
+          querySnapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() });
+          });
+          setQuestions(list);
+        } catch (error) {
+          console.error("Error fetching questions:", error);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      // 3. 問題の追加
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!title.trim()) return alert("問題文を入力してください");
 
         const newQuestion = {
-          roomId: groupId,
-          title: qTitle,
-          type: qType,
-          options: optionsList,
-          correctAnswer: correctAnswer,
-          explanation: qExplanation,
-          creator: username || user.uid.substring(0, 5),
-          creatorId: user.uid,
-          createdAt: Date.now(),
-          intervalDays: parseInt(qInterval) || 1,
-          nextReviewDate: Date.now() + (parseInt(qInterval) || 1) * 24 * 60 * 60 * 1000,
-          timesReviewed: 0,
-          difficulty: 'normal'
+          title,
+          type,
+          options: type === 'choice' ? options.filter(o => o.trim() !== '') : [],
+          correctAnswer: type === 'choice' ? correctAnswer : (correctAnswer === 'true'),
+          userId: user?.uid || "anonymous",
+          createdAt: new Date().toISOString()
         };
 
-        try {
-          const qCollection = collection(db, 'artifacts', appId, 'public', 'data', 'questions');
-          await addDoc(qCollection, newQuestion);
-          
-          await addActivity(`新しい問題「${qTitle.substring(0, 10)}...」を追加しました。`);
-          showToast("新しい問題を作成しました！");
-          
-          setQTitle('');
-          setQOptions(['', '', '', '']);
-          setQCorrectText('');
-          setQExplanation('');
-          setIsCreateModalOpen(false);
-        } catch (err) {
-          console.error(err);
-          showToast("問題の作成に失敗しました。", "error");
-        }
-      };
-
-      const handleDeleteQuestion = async (qId, title) => {
-        if (!window.confirm(`「${title}」を本当に削除しますか？`)) return;
-        try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'questions', qId);
-          await deleteDoc(docRef);
-          await addActivity(`問題「${title.substring(0, 10)}...」を削除しました。`);
-          showToast("問題を削除しました。");
-        } catch (e) {
-          showToast("削除に失敗しました。", "error");
-        }
-      };
-
-      // --- クイズセッション制御 ---
-      const startQuiz = () => {
-        if (questions.length === 0) {
-          showToast("問題がまだありません。作成してください。", "error");
-          return;
-        }
-        setQuizActive(true);
-        setQuizIndex(0);
-        setSelectedAnswer(null);
-        setTextAnswer('');
-        setQuizResults([]);
-        setQuizFinished(false);
-      };
-
-      const handleAnswerSubmit = (answer) => {
-        const currentQ = questions[quizIndex];
-        let isCorrect = false;
-
-        if (currentQ.type === 'choice' || currentQ.type === 'ox') {
-          isCorrect = answer === currentQ.correctAnswer;
-        } else {
-          isCorrect = answer.trim().toLowerCase() === currentQ.correctAnswer.trim().toLowerCase();
-        }
-
-        setSelectedAnswer(answer);
-        setQuizResults([...quizResults, { questionId: currentQ.id, title: currentQ.title, isCorrect, chosen: answer, correct: currentQ.correctAnswer }]);
-      };
-
-      const nextQuestion = () => {
-        setSelectedAnswer(null);
-        setTextAnswer('');
-        if (quizIndex + 1 < questions.length) {
-          setQuizIndex(quizIndex + 1);
-        } else {
-          setQuizFinished(true);
-          updateReminderSchedules();
-        }
-      };
-
-      const updateReminderSchedules = async () => {
-        quizResults.forEach(async (res) => {
-          const qObj = questions.find(q => q.id === res.questionId);
-          if (!qObj) return;
-
-          let newInterval = qObj.intervalDays || 1;
-          if (res.isCorrect) {
-            newInterval = Math.min(newInterval * 2, 30); 
-          } else {
-            newInterval = 1;
-          }
-
-          const nextDate = Date.now() + newInterval * 24 * 60 * 60 * 1000;
+        if (firebaseInitialized && db) {
           try {
-            const qDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'questions', qObj.id);
-            await updateDoc(qDocRef, {
-              intervalDays: newInterval,
-              nextReviewDate: nextDate,
-              timesReviewed: (qObj.timesReviewed || 0) + 1
-            });
-          } catch (e) {
-            console.error(e);
+            await addDoc(collection(db, "questions"), newQuestion);
+            fetchQuestions(user.uid);
+            resetForm();
+            setActiveTab('questions');
+          } catch (error) {
+            console.error("Error adding document: ", error);
+            alert("保存に失敗しました。");
           }
-        });
-        showToast("クイズ結果を保存し、復習予定を更新しました！");
+        } else {
+          // オフライン時のローカル追加
+          setQuestions([{ id: Date.now().toString(), ...newQuestion }, ...questions]);
+          resetForm();
+          setActiveTab('questions');
+        }
       };
 
-      const reviewRequiredQuestions = useMemo(() => {
-        const now = Date.now();
-        return questions.filter(q => !q.nextReviewDate || q.nextReviewDate <= now);
-      }, [questions]);
-
-      const markAsReviewed = async (qId, wasCorrect) => {
-        const qObj = questions.find(q => q.id === qId);
-        if (!qObj) return;
-
-        let newInterval = qObj.intervalDays || 1;
-        if (wasCorrect) {
-          newInterval = Math.min(newInterval * 2, 30);
-        } else {
-          newInterval = 1;
-        }
-        const nextDate = Date.now() + newInterval * 24 * 60 * 60 * 1000;
-
-        try {
-          const qDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'questions', qId);
-          await updateDoc(qDocRef, {
-            intervalDays: newInterval,
-            nextReviewDate: nextDate,
-            timesReviewed: (qObj.timesReviewed || 0) + 1
-          });
-          showToast(`復習完了！次回の復習は ${newInterval}日後 です。`);
-        } catch (e) {
-          console.error(e);
-        }
+      const resetForm = () => {
+        setTitle('');
+        setOptions(['', '', '', '']);
+        setCorrectAnswer('');
       };
 
       return (
         <div className="flex flex-col min-h-screen">
-          
-          {/* トースト通知 */}
-          {toast && (
-            <div className={`fixed top-5 right-5 z-50 px-6 py-3 rounded-xl shadow-xl flex items-center gap-3 border transition-all transform duration-300 translate-y-0 text-white ${
-              toast.type === 'error' ? 'bg-rose-500 border-rose-400' : 'bg-emerald-600 border-emerald-500'
-            }`}>
-              <i className={`fa-solid ${toast.type === 'error' ? 'fa-circle-xmark' : 'fa-circle-check'} text-lg`}></i>
-              <span className="font-medium text-sm">{toast.message}</span>
-            </div>
-          )}
-
           {/* ヘッダー */}
-          <header className="bg-white border-b border-slate-200 sticky top-0 z-40 px-4 py-3 sm:px-6">
-            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              
-              <div className="flex items-center gap-4">
-                <div className="bg-indigo-600 text-white p-2.5 rounded-xl flex items-center justify-center shadow-md shadow-indigo-100">
-                  <i className="fa-solid fa-graduation-cap text-xl"></i>
+          <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md shadow-indigo-100">
+                  <i className="fa-solid fa-graduation-cap text-lg"></i>
                 </div>
-                <div>
-                  <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-                    ShareQ
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100">Beta</span>
-                  </h1>
-                  <p className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
-                    <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                    現在の共同ルーム: <strong className="text-indigo-600 font-semibold">{groupId}</strong>
-                  </p>
-                </div>
+                <span className="text-xl font-bold tracking-tight bg-gradient-to-r block bg-clip-text text-transparent from-indigo-600 to-violet-600">ShareQ</span>
               </div>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <form onSubmit={handleJoinRoom} className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
-                  <input
-                    type="text"
-                    placeholder="別のルームID..."
-                    className="bg-transparent px-3 py-1 text-xs outline-none w-32 focus:w-40 transition-all font-medium"
-                    value={joinRoomInput}
-                    onChange={(e) => setJoinRoomInput(e.target.value)}
-                  />
-                  <button type="submit" className="bg-white hover:bg-slate-50 text-slate-700 p-1.5 rounded-md text-xs font-semibold shadow-sm transition">
-                    移動
-                  </button>
-                </form>
-
-                <button
-                  onClick={copyInviteLink}
-                  className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition"
-                >
-                  <i className="fa-solid fa-user-plus"></i>
-                  <span>招待リンク</span>
-                </button>
-
-                <div className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 flex items-center gap-2">
-                  <i className="fa-solid fa-user text-slate-500 text-xs"></i>
-                  <span className="text-xs font-medium text-slate-700 truncate max-w-[120px]">
-                    {username || 'ゲストユーザー'}
+              <div className="flex items-center space-x-3">
+                {firebaseInitialized ? (
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Connected
                   </span>
-                  <button 
-                    onClick={() => setIsSettingUsername(true)}
-                    className="text-slate-400 hover:text-indigo-600 transition"
-                    title="名前を変更"
-                  >
-                    <i className="fa-solid fa-pen text-[10px]"></i>
-                  </button>
-                </div>
+                ) : (
+                  <span className="bg-amber-50 text-amber-700 border border-amber-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span> Local Demo Mode
+                  </span>
+                )}
               </div>
-
             </div>
           </header>
 
-          {/* ユーザー名編集モーダル */}
-          {isSettingUsername && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-200">
-                <h3 className="text-lg font-bold text-slate-900 mb-2">ユーザー名の変更</h3>
-                <p className="text-xs text-slate-500 mb-4">
-                  友達と一緒に問題を解いたり作成したりする際に表示されるニックネームを設定します。
-                </p>
-                <input
-                  type="text"
-                  className="w-full px-4 py-2 border border-slate-200 rounded-xl mb-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm"
-                  placeholder="例: たろう、Sakura"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  maxLength={15}
-                  autoFocus
-                />
-                <div className="flex gap-2 justify-end">
-                  <button
-                    onClick={() => setIsSettingUsername(false)}
-                    className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition"
-                  >
-                    キャンセル
-                  </button>
-                  <button
-                    onClick={handleSaveUsername}
-                    className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition"
-                  >
-                    保存する
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* メインレイアウト */}
-          <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col md:flex-row gap-8">
             
-            {/* 左側：ナビゲーション・サイドバー */}
-            <div className="lg:col-span-1 flex flex-col gap-6">
+            {/* サイドナビゲーション */}
+            <nav className="w-full md:w-64 flex flex-row md:flex-col gap-2 h-fit">
+              <button 
+                onClick={() => setActiveTab('dashboard')} 
+                className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <i className="fa-solid fa-house w-5"></i> ダッシュボード
+              </button>
+              <button 
+                onClick={() => setActiveTab('create')} 
+                className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'create' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <i className="fa-solid fa-plus w-5"></i> 問題を作る
+              </button>
+              <button 
+                onClick={() => setActiveTab('questions')} 
+                className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${activeTab === 'questions' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-600 hover:bg-slate-100'}`}
+              >
+                <i className="fa-solid fa-list w-5"></i> 問題一覧 ({questions.length})
+              </button>
+            </nav>
+
+            {/* メインコンテンツエリア */}
+            <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[400px]">
               
-              <div className="bg-white rounded-2xl border border-slate-200/80 p-3 shadow-sm">
-                <p className="text-[11px] font-bold tracking-wider text-slate-400 uppercase px-3 mb-2">メニュー</p>
-                <nav className="space-y-1">
-                  <button
-                    onClick={() => { setActiveTab('dashboard'); setQuizActive(false); }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
-                      activeTab === 'dashboard' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <i className="fa-solid fa-gauge-high"></i>
-                      ダッシュボード
-                    </span>
-                    <i className="fa-solid fa-chevron-right text-[10px] opacity-60"></i>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveTab('questions'); setQuizActive(false); }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
-                      activeTab === 'questions' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <i className="fa-solid fa-list-check"></i>
-                      問題一覧・作成
-                    </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${activeTab === 'questions' ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                      {questions.length}
-                    </span>
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveTab('reminders'); setQuizActive(false); }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
-                      activeTab === 'reminders' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <i className="fa-solid fa-clock-rotate-left"></i>
-                      今日のリマインダー
-                    </span>
-                    {reviewRequiredQuestions.length > 0 && (
-                      <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-bold animate-bounce">
-                        {reviewRequiredQuestions.length}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => { setActiveTab('members'); setQuizActive(false); }}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition ${
-                      activeTab === 'members' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <i className="fa-solid fa-users"></i>
-                      ルームのメンバー
-                    </span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                      {roomMembers.length}
-                    </span>
-                  </button>
-                </nav>
-
-                <div className="border-t border-slate-100 mt-4 pt-4 px-3">
-                  <button
-                    onClick={startQuiz}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 px-4 rounded-xl text-sm font-bold shadow-md shadow-emerald-100 hover:shadow-lg transition flex items-center justify-center gap-2"
-                  >
-                    <i className="fa-solid fa-play text-xs"></i>
-                    全員分のクイズに挑戦
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-gradient-to-br from-indigo-900 to-slate-900 text-white rounded-2xl p-5 shadow-lg relative overflow-hidden">
-                <h4 className="text-xs font-bold text-indigo-300 uppercase tracking-wider mb-1">ルーム情報</h4>
-                <p className="text-lg font-bold truncate mb-3">{groupId}</p>
-                <div className="space-y-2.5 text-xs text-indigo-100">
-                  <div className="flex justify-between">
-                    <span className="opacity-70">全問題数:</span>
-                    <span className="font-bold">{questions.length} 問</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-70">要復習問題:</span>
-                    <span className="font-bold text-amber-300">{reviewRequiredQuestions.length} 問</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="opacity-70">参加メンバー:</span>
-                    <span className="font-bold">{roomMembers.length} 人</span>
-                  </div>
-                </div>
-                <div className="mt-4 pt-4 border-t border-indigo-800">
-                  <button onClick={copyInviteLink} className="w-full bg-white/10 hover:bg-white/20 text-white text-xs font-bold py-1.5 rounded-lg text-center transition">
-                    <i className="fa-solid fa-copy mr-1.5"></i>招待URLをコピー
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* 右側メインコンテンツ */}
-            <div className="lg:col-span-3 flex flex-col gap-6">
-              
-              {/* --- クイズプレイ画面 --- */}
-              {quizActive ? (
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-md">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-                    <span className="bg-indigo-100 text-indigo-800 text-xs px-2.5 py-1 rounded-full font-bold">
-                      問題 {quizIndex + 1} / {questions.length}
-                    </span>
-                    <button onClick={() => { setQuizActive(false); setQuizFinished(false); }} className="text-slate-400 hover:text-rose-600 transition text-sm">
-                      <i className="fa-solid fa-xmark mr-1"></i>中断
-                    </button>
+              {/* --- タブ1: ダッシュボード --- */}
+              {activeTab === 'dashboard' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">こんにちは！👋</h2>
+                    <p className="text-slate-500 text-sm mt-1">ShareQ で友達と効率よく問題を共有・復習しましょう。</p>
                   </div>
 
-                  {!quizFinished ? (
-                    <div>
-                      <div className="mb-3">
-                        <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                          {questions[quizIndex]?.type === 'choice' && '4択問題'}
-                          {questions[quizIndex]?.type === 'ox' && '○×判定'}
-                          {questions[quizIndex]?.type === 'text' && '記述式'}
-                        </span>
+                  {!firebaseInitialized && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3 text-amber-800 text-sm">
+                      <i className="fa-solid fa-triangle-exclamation text-lg mt-0.5"></i>
+                      <div>
+                        <p className="font-bold">Firebase 設定が未完了です</p>
+                        <p className="mt-0.5 text-amber-700">コード内の `firebaseConfig` を書き換えるまで、作成した問題はブラウザを閉じると消去されます（デモ動作）。</p>
                       </div>
-                      <h2 className="text-xl font-bold text-slate-900 mb-6">{questions[quizIndex]?.title}</h2>
+                    </div>
+                  )}
 
-                      {/* 4択 */}
-                      {questions[quizIndex]?.type === 'choice' && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-                          {questions[quizIndex]?.options.map((opt, oIdx) => {
-                            const isCorrect = opt === questions[quizIndex].correctAnswer;
-                            const isSelected = selectedAnswer === opt;
-                            let btnStyle = "border-slate-200 hover:bg-indigo-50/50 text-slate-700";
-                            if (selectedAnswer) {
-                              btnStyle = isCorrect ? "bg-emerald-50 border-emerald-500 text-emerald-800" : isSelected ? "bg-rose-50 border-rose-500 text-rose-800" : "opacity-40";
-                            }
-                            return (
-                              <button key={oIdx} disabled={!!selectedAnswer} onClick={() => handleAnswerSubmit(opt)} className={`p-4 rounded-xl border text-left text-sm transition font-medium ${btnStyle}`}>
-                                {opt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="border border-slate-200 rounded-xl p-5 bg-slate-50">
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">総作成問題数</span>
+                      <p className="text-3xl font-bold text-slate-800 mt-2">{questions.length} <span className="text-sm font-normal text-slate-500">問</span></p>
+                    </div>
+                    <div className="border border-slate-200 rounded-xl p-5 bg-slate-50">
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">次回のリマインダー</span>
+                      <p className="text-sm font-medium text-slate-600 mt-3"><i className="fa-regular fa-clock mr-1.5 text-indigo-500"></i>設定されていません</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
-                      {/* ○× */}
-                      {questions[quizIndex]?.type === 'ox' && (
-                        <div className="grid grid-cols-2 gap-4 mb-6">
-                          {['O (正しい)', 'X (誤り)'].map((opt) => {
-                            const isCorrect = opt === questions[quizIndex].correctAnswer;
-                            const isSelected = selectedAnswer === opt;
-                            let btnStyle = "border-slate-200 hover:bg-indigo-50/50 text-2xl text-center";
-                            if (selectedAnswer) {
-                              btnStyle = isCorrect ? "bg-emerald-50 border-emerald-500 text-emerald-800" : isSelected ? "bg-rose-50 border-rose-500 text-rose-800" : "opacity-40";
-                            }
-                            return (
-                              <button key={opt} disabled={!!selectedAnswer} onClick={() => handleAnswerSubmit(opt)} className={`p-6 rounded-xl border font-bold transition ${btnStyle}`}>
-                                {opt.split(' ')[0]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+              {/* --- タブ2: 問題の新規作成 --- */}
+              {activeTab === 'create' && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-bold text-slate-900">新しい問題の作成</h2>
+                  
+                  <form onSubmit={handleSubmit} className="space-y-5">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">問題文</label>
+                      <input 
+                        type="text" 
+                        value={title} 
+                        onChange={(e) => setTitle(e.target.value)}
+                        placeholder="例: 日本で一番高い山の名前は？"
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                      />
+                    </div>
 
-                      {/* 記述式 */}
-                      {questions[quizIndex]?.type === 'text' && (
-                        <div className="mb-6">
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              disabled={!!selectedAnswer}
-                              placeholder="答えを入力してください..."
-                              className="flex-1 px-4 py-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                              value={textAnswer}
-                              onChange={(e) => setTextAnswer(e.target.value)}
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">出題形式</label>
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
+                          <input type="radio" checked={type === 'choice'} onChange={() => setType('choice')} className="text-indigo-600 focus:ring-indigo-500" />
+                          4択クイズ
+                        </label>
+                        <label className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
+                          <input type="radio" checked={type === 'boolean'} onChange={() => setType('boolean')} className="text-indigo-600 focus:ring-indigo-500" />
+                          ○✕問題
+                        </label>
+                      </div>
+                    </div>
+
+                    {type === 'choice' ? (
+                      <div className="space-y-3">
+                        <label className="block text-sm font-semibold text-slate-700">選択肢と解答の指定</label>
+                        {options.map((option, i) => (
+                          <div key={i} className="flex items-center gap-3">
+                            <span className="text-xs font-bold text-slate-400 bg-slate-100 w-6 h-6 rounded-full flex items-center justify-center">{i + 1}</span>
+                            <input 
+                              type="text" 
+                              value={option} 
+                              onChange={(e) => {
+                                const newOpts = [...options];
+                                newOpts[i] = e.target.value;
+                                setOptions(newOpts);
+                              }}
+                              placeholder={`選択肢 ${i + 1}`}
+                              className="flex-1 px-4 py-2 rounded-xl border border-slate-300 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                             />
-                            <button disabled={!!selectedAnswer || !textAnswer.trim()} onClick={() => handleAnswerSubmit(textAnswer)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-xl text-sm font-bold transition">
-                              判定
+                            <button 
+                              type="button"
+                              onClick={() => setCorrectAnswer(option)}
+                              className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${correctAnswer === option && option !== '' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                            >
+                              {correctAnswer === option && option !== '' ? '正解' : '正解にする'}
                             </button>
                           </div>
-                          {selectedAnswer && (
-                            <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-100 text-sm">
-                              正解: <strong className="text-emerald-600 font-semibold">{questions[quizIndex].correctAnswer}</strong>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 解説エリア */}
-                      {selectedAnswer && (
-                        <div className="mt-6 p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl animate-in fade-in duration-200">
-                          <h4 className="font-bold text-indigo-900 text-sm mb-1">
-                            {selectedAnswer === questions[quizIndex].correctAnswer ? <span className="text-emerald-600"><i className="fa-solid fa-circle-check mr-1"></i>正解！</span> : <span className="text-rose-500"><i className="fa-solid fa-circle-xmark mr-1"></i>不正解...</span>}
-                          </h4>
-                          <p className="text-xs text-slate-600 leading-relaxed">{questions[quizIndex].explanation || '解説は登録されていません。'}</p>
-                          <button onClick={nextQuestion} className="mt-4 w-full bg-slate-800 hover:bg-slate-900 text-white py-2 px-4 rounded-lg text-xs font-bold transition">
-                            {quizIndex + 1 === questions.length ? '結果を見る' : '次の問題へ'}
+                        ))}
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">正解の選択</label>
+                        <div className="flex gap-3">
+                          <button 
+                            type="button" 
+                            onClick={() => setCorrectAnswer('true')}
+                            className={`flex-1 py-3 font-bold rounded-xl border transition-all ${correctAnswer === 'true' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                          >
+                            ⭕ 正解は「○」
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => setCorrectAnswer('false')}
+                            className={`flex-1 py-3 font-bold rounded-xl border transition-all ${correctAnswer === 'false' ? 'bg-rose-500 text-white border-rose-500' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                          >
+                            ❌ 正解は「✕」
                           </button>
                         </div>
-                      )}
+                      </div>
+                    )}
+
+                    <button 
+                      type="submit"
+                      className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all text-sm mt-4"
+                    >
+                      問題を作成して保存
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* --- タブ3: 問題一覧 --- */}
+              {activeTab === 'questions' && (
+                <div className="space-y-6">
+                  <h2 className="text-xl font-bold text-slate-900">登録された問題</h2>
+
+                  {loading ? (
+                    <div className="text-center py-8 text-slate-400 text-sm">
+                      <i className="fa-solid fa-spinner animate-spin mr-2"></i> 読み込み中...
+                    </div>
+                  ) : questions.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-2xl">
+                      問題がありません。「問題を作る」タブから作成してください。
                     </div>
                   ) : (
-                    /* クイズ終了画面 */
-                    <div className="text-center py-6">
-                      <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 shadow-sm">
-                        <i className="fa-solid fa-trophy"></i>
-                      </div>
-                      <h3 className="text-xl font-bold text-slate-900 mb-1">クイズ完了！</h3>
-                      <p className="text-sm text-slate-500 mb-6">
-                        正解率: <strong>{quizResults.filter(r => r.isCorrect).length}</strong> / {questions.length}
-                      </p>
-                      <div className="max-h-60 overflow-y-auto border border-slate-100 rounded-xl p-2 text-left mb-6 custom-scrollbar">
-                        {quizResults.map((res, idx) => (
-                          <div key={idx} className="flex items-center justify-between p-2 border-b border-slate-50 last:border-b-0 text-xs">
-                            <span className="truncate max-w-[200px] text-slate-700 font-medium">{res.title}</span>
-                            <span className={`font-semibold ${res.isCorrect ? 'text-emerald-600' : 'text-rose-500'}`}>
-                              {res.isCorrect ? '○' : '×'}
+                    <div className="grid grid-cols-1 gap-4">
+                      {questions.map((q) => (
+                        <div key={q.id} className="p-5 border border-slate-200 rounded-2xl bg-slate-50/50 hover:bg-slate-50 transition-all">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${q.type === 'choice' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'bg-purple-50 text-purple-700 border border-purple-100'}`}>
+                              {q.type === 'choice' ? '4択クイズ' : '○✕問題'}
                             </span>
                           </div>
-                        ))}
-                      </div>
-                      <button onClick={() => { setQuizActive(false); setQuizFinished(false); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-md transition">
-                        ダッシュボードに戻る
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                /* --- 通常コンテンツタブ制御 --- */
-                <div>
-                  {/* TAB 1: ダッシュボード */}
-                  {activeTab === 'dashboard' && (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl"><i className="fa-solid fa-folder-open text-lg"></i></div>
-                          <div><p className="text-xs text-slate-400 font-medium">合計問題数</p><p className="text-xl font-bold text-slate-800">{questions.length} 問</p></div>
-                        </div>
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                          <div className="p-3 bg-amber-50 text-amber-600 rounded-xl"><i className="fa-solid fa-bell text-lg"></i></div>
-                          <div><p className="text-xs text-slate-400 font-medium">今日の要復習</p><p className="text-xl font-bold text-amber-600">{reviewRequiredQuestions.length} 問</p></div>
-                        </div>
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl"><i className="fa-solid fa-user-group text-lg"></i></div>
-                          <div><p className="text-xs text-slate-400 font-medium">アクティブメンバー</p><p className="text-xl font-bold text-slate-800">{roomMembers.length} 名</p></div>
-                        </div>
-                      </div>
+                          <h4 className="font-bold text-slate-800 text-base">{q.title}</h4>
+                          
+                          {q.type === 'choice' && q.options && (
+                            <div className="grid grid-cols-2 gap-2 mt-3">
+                              {q.options.map((opt, idx) => (
+                                <div key={idx} className={`p-2.5 rounded-xl text-xs font-medium border ${opt === q.correctAnswer ? 'bg-emerald-50 text-emerald-800 border-emerald-200 font-bold' : 'bg-white text-slate-600'}`}>
+                                  {opt} {opt === q.correctAnswer && '✅'}
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
-                      {/* アクティビティログ */}
-                      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-                        <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-                          <i className="fa-solid fa-chart-line text-slate-400"></i>ルームのリアルタイムアクティビティ
-                        </h3>
-                        <div className="space-y-3 max-h-[320px] overflow-y-auto custom-scrollbar pr-1">
-                          {activityLog.length === 0 ? (
-                            <p className="text-xs text-slate-400 py-4 text-center">アクティビティはまだありません。</p>
-                          ) : (
-                            activityLog.map((log) => (
-                              <div key={log.id} className="flex items-start justify-between border-b border-slate-50 pb-2 text-xs last:border-0 last:pb-0">
-                                <p className="text-slate-600"><span className="font-bold text-indigo-600 mr-1.5">{log.user}</span>{log.text}</p>
-                                <span className="text-[10px] text-slate-400 whitespace-nowrap ml-2">
-                                  {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                              </div>
-                            ))
+                          {q.type === 'boolean' && (
+                            <p className="mt-2 text-xs text-slate-500 font-medium">
+                              正解: <span className="font-bold text-emerald-600">{q.correctAnswer === true || q.correctAnswer === 'true' ? '⭕ ○' : '❌ ✕'}</span>
+                            </p>
                           )}
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 2: 問題一覧・作成 */}
-                  {activeTab === 'questions' && (
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-base font-bold text-slate-800">登録された問題一覧</h3>
-                        <button onClick={() => setIsCreateModalOpen(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 transition shadow-sm">
-                          <i className="fa-solid fa-plus"></i>問題作成
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        {questions.length === 0 ? (
-                          <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 border-dashed text-slate-400 text-sm">
-                            問題がありません。右上のボタンから最初の問題を作成しましょう！
-                          </div>
-                        ) : (
-                          questions.map((q) => (
-                            <div key={q.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-[10px] px-2 py-0.5 font-bold bg-slate-100 text-slate-600 rounded">
-                                    {q.type === 'choice' ? '4択' : q.type === 'ox' ? '○×' : '記述'}
-                                  </span>
-                                  <span className="text-xs text-slate-400">作成: {q.creator}</span>
-                                </div>
-                                <h4 className="text-sm font-bold text-slate-800 leading-tight">{q.title}</h4>
-                              </div>
-                              <button onClick={() => handleDeleteQuestion(q.id, q.title)} className="self-end md:self-center text-slate-400 hover:text-rose-500 p-2 transition" title="問題を削除">
-                                <i className="fa-solid fa-trash-can text-xs"></i>
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 3: 今日の復習・リマインダー */}
-                  {activeTab === 'reminders' && (
-                    <div className="space-y-4">
-                      <div className="p-4 bg-amber-50 border border-amber-200/60 rounded-xl">
-                        <h4 className="text-xs font-bold text-amber-800 mb-1 flex items-center gap-1.5"><i className="fa-solid fa-circle-info"></i>忘却曲線ベースのリマインダー</h4>
-                        <p className="text-[11px] text-amber-700 leading-relaxed">本日復習の予定日に達している問題です。ここで手動で「完了（正解/不正解）」を選択すると、次回の通知間隔が調整されます。</p>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        {reviewRequiredQuestions.length === 0 ? (
-                          <div className="bg-white p-10 text-center rounded-2xl border border-slate-200 text-emerald-600 font-medium text-sm flex flex-col items-center gap-2">
-                            <i className="fa-solid fa-circle-check text-xl"></i>すべての復習が完了しています！素晴らしい！
-                          </div>
-                        ) : (
-                          reviewRequiredQuestions.map((q) => (
-                            <div key={q.id} className="bg-white p-4 rounded-xl border border-amber-200/80 shadow-sm space-y-3">
-                              <div>
-                                <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 font-bold rounded">要復習</span>
-                                <h4 className="text-sm font-bold text-slate-800 mt-1">{q.title}</h4>
-                              </div>
-                              <div className="flex justify-between items-center border-t border-slate-50 pt-3">
-                                <span className="text-[11px] text-slate-400">現在の間隔: {q.intervalDays || 1} 日</span>
-                                <div className="flex gap-1">
-                                  <button onClick={() => markAsReviewed(q.id, false)} className="bg-rose-50 text-rose-600 border border-rose-100 px-2.5 py-1 rounded text-xs font-bold hover:bg-rose-100 transition">
-                                    間違えた
-                                  </button>
-                                  <button onClick={() => markAsReviewed(q.id, true)} className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-emerald-700 transition">
-                                    正解した
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 4: ルームのメンバー */}
-                  {activeTab === 'members' && (
-                    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-                      <h3 className="text-sm font-bold text-slate-800 mb-4"><i className="fa-solid fa-users mr-2 text-slate-400"></i>参加中のメンバー一覧</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {roomMembers.map((m) => (
-                          <div key={m.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-2.5">
-                            <div className="w-7 h-7 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold text-xs">
-                              {m.name ? m.name.substring(0, 1).toUpperCase() : 'U'}
-                            </div>
-                            <div className="truncate">
-                              <p className="text-xs font-bold text-slate-700 truncate">{m.name || '名無しゲスト'}</p>
-                              <p className="text-[10px] text-slate-400">オンライン</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
+                      ))}
                     </div>
                   )}
                 </div>
               )}
 
-            </div>
-          </main>
-
-          {/* 問題作成モーダル */}
-          {isCreateModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto custom-scrollbar animate-in fade-in zoom-in-95 duration-200">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-                  <h3 className="text-base font-bold text-slate-900">新しい問題を作成</h3>
-                  <button onClick={() => setIsCreateModalOpen(false)} className="text-slate-400 hover:text-slate-600"><i className="fa-solid fa-xmark"></i></button>
-                </div>
-
-                <form onSubmit={handleCreateQuestion} className="space-y-4 text-xs">
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">問題タイプ</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[['choice', '4択問題'], ['ox', '○×判定'], ['text', '記述式']].map(([val, label]) => (
-                        <button key={val} type="button" onClick={() => setQType(val)} className={`py-2 text-center font-bold rounded-lg border transition ${qType === val ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">問題内容</label>
-                    <textarea rows="3" placeholder="例: 日本で一番高い山の名前は？" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-indigo-500" value={qTitle} onChange={(e) => setQTitle(e.target.value)} required />
-                  </div>
-
-                  {/* 4択オプション */}
-                  {qType === 'choice' && (
-                    <div className="space-y-2">
-                      <label className="block font-bold text-slate-700">選択肢と正解チェック</label>
-                      {qOptions.map((opt, idx) => (
-                        <div key={idx} className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-lg border border-slate-200">
-                          <input type="radio" name="correctChoice" checked={qCorrectChoice === idx} onChange={() => setQCorrectChoice(idx)} className="w-4 h-4 text-indigo-600" />
-                          <input type="text" placeholder={`選択肢 ${idx + 1}`} className="flex-1 bg-transparent px-2 py-1 outline-none" value={opt} onChange={(e) => {
-                            const updated = [...qOptions];
-                            updated[idx] = e.target.value;
-                            setQOptions(updated);
-                          }} required={idx < 2} />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* ○×オプション */}
-                  {qType === 'ox' && (
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">正解判定</label>
-                      <select className="w-full px-3 py-2 border border-slate-200 rounded-lg bg-white" value={qCorrectOx} onChange={(e) => setQCorrectOx(e.target.value)}>
-                        <option value="O (正しい)">O (正しい)</option>
-                        <option value="X (誤り)">X (誤り)</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {/* 記述式オプション */}
-                  {qType === 'text' && (
-                    <div>
-                      <label className="block font-bold text-slate-700 mb-1">正解テキスト</label>
-                      <input type="text" placeholder="例: 富士山" className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={qCorrectText} onChange={(e) => setQCorrectText(e.target.value)} required />
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">解説 (任意)</label>
-                    <textarea rows="2" placeholder="解答後に表示される解説文を入力..." className="w-full px-3 py-2 border border-slate-200 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500" value={qExplanation} onChange={(e) => setQExplanation(e.target.value)} />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">初期復習スパン（日）</label>
-                    <input type="number" min="1" max="30" className="w-full px-3 py-2 border border-slate-200 rounded-lg" value={qInterval} onChange={(e) => setQInterval(e.target.value)} />
-                  </div>
-
-                  <div className="flex gap-2 justify-end border-t border-slate-100 pt-3">
-                    <button type="button" onClick={() => setIsCreateModalOpen(false)} className="px-4 py-2 font-medium text-slate-600 hover:bg-slate-50 rounded-lg">キャンセル</button>
-                    <button type="submit" className="px-4 py-2 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">作成する</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          <footer className="bg-white border-t border-slate-200 py-4 px-6 text-center text-[11px] text-slate-400 mt-auto">
-            &copy; 2026 ShareQ. All rights reserved.
-          </footer>
+            </main>
+          </div>
         </div>
       );
     }
 
-    const container = document.body;
-    const root = ReactDOM.createRoot(container);
-    root.render(<App />);
+    // Reactアプリのレンダリング起動
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
