@@ -13,12 +13,10 @@
 
   <div id="root"></div>
 
-  <!-- React & Babel -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <!-- Firebase SDK -->
   <script type="importmap">
     {
       "imports": {
@@ -31,7 +29,7 @@
 
   <script type="text/babel" data-type="module">
     import { initializeApp } from "firebase/app";
-    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot } from "firebase/firestore";
+    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, setDoc, getDoc } from "firebase/firestore";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
     const firebaseConfig = {
@@ -68,7 +66,7 @@
 
     const { useState, useEffect } = React;
 
-    // 🔒 管理者用ログインパスワード（ここを書き換えることで自由に変更できます）
+    // 🔒 管理者用ログインパスワード
     const ADMIN_PASSWORD = "Haya1012";
 
     function App() {
@@ -77,6 +75,7 @@
       const [questions, setQuestions] = useState([]);
       const [reminders, setReminders] = useState([]);
       const [adminQuestions, setAdminQuestions] = useState([]);
+      const [meetLogs, setMeetLogs] = useState([]); // 管理画面用のMeetログ
       
       // 管理者ログイン状態の管理
       const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -86,6 +85,8 @@
       // ルーム＆選択状態
       const [currentRoom, setCurrentRoom] = useState(null);
       const [roomInput, setRoomInput] = useState('');
+      const [meetLinkInput, setMeetLinkInput] = useState(''); // Meetリンク入力用
+      const [currentMeetLink, setCurrentMeetLink] = useState(''); // 現在のルームのMeetリンク
       const [selectedAnswers, setSelectedAnswers] = useState({});
       const [aiExplanations, setAiExplanations] = useState({});
       const [aiLoading, setAiLoading] = useState({});
@@ -102,6 +103,13 @@
       const [aiChatResponse, setAiChatResponse] = useState('');
       const [chatLoading, setChatLoading] = useState(false);
 
+      // ユーザーの簡易表示用ニックネーム（管理画面判定用）
+      const [nickname, setNickname] = useState(() => localStorage.getItem('shareq_name') || `ゲスト_${Math.floor(1000 + Math.random() * 9000)}`);
+
+      useEffect(() => {
+        localStorage.setItem('shareq_name', nickname);
+      }, [nickname]);
+
       useEffect(() => {
         if (firebaseInitialized && auth) {
           signInAnonymously(auth).catch(console.error);
@@ -117,10 +125,27 @@
               onSnapshot(query(collection(db, "admin_escalations"), orderBy("createdAt", "desc")), (snap) => {
                 setAdminQuestions(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
+              // 管理用：Meet参加ログの購読
+              onSnapshot(query(collection(db, "meet_logs"), orderBy("timestamp", "desc")), (snap) => {
+                setMeetLogs(snap.docs.map(d => ({id: d.id, ...d.data()})));
+              });
             }
           });
         }
       }, []);
+
+      // ルームのMeetリンクのリアルタイム監視
+      useEffect(() => {
+        if (!currentRoom || !db) return;
+        const unsub = onSnapshot(doc(db, "rooms", currentRoom), (docSnap) => {
+          if (docSnap.exists()) {
+            setCurrentMeetLink(docSnap.data().meetLink || '');
+          } else {
+            setCurrentMeetLink('');
+          }
+        });
+        return () => unsub();
+      }, [currentRoom]);
 
       // 管理者ログイン試行
       const handleAdminLogin = (e) => {
@@ -211,6 +236,46 @@
         setRemText(''); setRemTime('');
       };
 
+      // ルーム作成または入室
+      const handleJoinOrCreateRoom = async (e) => {
+        e.preventDefault();
+        const roomName = roomInput.trim();
+        if (!roomName) return;
+
+        // ルームのドキュメントを確認、なければ新規作成（Meetリンク付与）
+        const roomRef = doc(db, "rooms", roomName);
+        const roomSnap = await getDoc(roomRef);
+
+        if (!roomSnap.exists()) {
+          // 新規作成の場合、入力されたMeetリンク（空でも可）を設定
+          await setDoc(roomRef, {
+            name: roomName,
+            meetLink: meetLinkInput.trim() || "https://meet.google.com/",
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        setCurrentRoom(roomName);
+        setRoomInput('');
+        setMeetLinkInput('');
+      };
+
+      // Google Meetを開いた時のログ取得機能
+      const handleOpenMeet = async () => {
+        if (!currentMeetLink) return;
+        
+        // 管理用のログをFirestoreに保存
+        await addDoc(collection(db, "meet_logs"), {
+          user: nickname,
+          room: currentRoom,
+          meetLink: currentMeetLink,
+          timestamp: new Date().toISOString()
+        });
+
+        // 実際に別タブでGoogle Meetを開く
+        window.open(currentMeetLink, '_blank');
+      };
+
       return (
         <div className="flex flex-col min-h-screen">
           <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
@@ -219,7 +284,13 @@
                 <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md"><i className="fa-solid fa-graduation-cap"></i></div>
                 <span className="text-xl font-bold bg-gradient-to-r bg-clip-text text-transparent from-indigo-600 to-violet-600">ShareQ AI</span>
               </div>
+              
               <div className="flex items-center space-x-4">
+                {/* ニックネーム変更UI */}
+                <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-xl text-xs">
+                  <span className="text-slate-500">名前:</span>
+                  <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} className="bg-transparent font-bold text-slate-700 w-24 border-b border-transparent focus:border-indigo-500 outline-none" title="管理画面にこの名前で表示されます" />
+                </div>
                 {currentRoom && <span className="bg-indigo-50 text-indigo-700 text-xs px-3 py-1.5 rounded-full font-bold"><i className="fa-solid fa-door-open mr-1"></i> {currentRoom}</span>}
                 <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Connected
@@ -234,8 +305,8 @@
               <button onClick={() => setActiveTab('create')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'create' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-plus w-5"></i> 問題を作る</button>
               <button onClick={() => setActiveTab('questions')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'questions' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-list w-5"></i> 問題一覧・AI採点</button>
               <button onClick={() => setActiveTab('ai-chat')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'ai-chat' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-robot w-5"></i> AI質問箱</button>
-              <button onClick={() => setActiveTab('admin')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><i className="fa-solid fa-lock w-5"></i> 管理画面 ({adminQuestions.length})</button>
               <button onClick={() => setActiveTab('room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-users w-5"></i> ルーム会議</button>
+              <button onClick={() => setActiveTab('admin')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><i className="fa-solid fa-lock w-5"></i> 管理画面 ({adminQuestions.length + meetLogs.length})</button>
             </nav>
 
             <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[400px]">
@@ -359,11 +430,67 @@
                 </div>
               )}
 
-              {/* 🔒 タブ5: 管理画面（認証ガードロック付き） */}
+              {/* ルーム機能（Google Meet連携強化） */}
+              {activeTab === 'room' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">👥 ルーム会議室</h2>
+                    <p className="text-slate-500 text-sm">特定のルームに参加して、紐づいたGoogle Meetの通話リンクでやり取りできます。</p>
+                  </div>
+                  
+                  {!currentRoom ? (
+                    <form onSubmit={handleJoinOrCreateRoom} className="bg-slate-50 p-6 rounded-2xl border text-center space-y-4 max-w-md mx-auto">
+                      <div>
+                        <label className="block text-left text-xs font-bold text-slate-600 mb-1">① ルーム名</label>
+                        <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学Aの部屋" className="w-full px-4 py-2 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
+                      </div>
+                      <div>
+                        <label className="block text-left text-xs font-bold text-slate-600 mb-1">② Google Meetリンク（新規ルーム作成時のみ有効）</label>
+                        <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-center text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                        <p className="text-[10px] text-slate-400 mt-1 text-left">※空欄のまま入室するとデフォルトのGoogle Meetが登録されます。既に存在する部屋の場合は、元々登録されているMeetに接続します。</p>
+                      </div>
+                      <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full transition-all shadow-md">
+                        ルームを作成 / 入室する
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center">
+                        <p className="text-sm font-bold text-emerald-800">
+                          <i className="fa-solid fa-door-open mr-1.5"></i>ルーム「<strong>{currentRoom}</strong>」に滞在中
+                        </p>
+                        <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold transition-all">退室する</button>
+                      </div>
+
+                      <div className="border border-slate-200 rounded-2xl p-6 bg-white shadow-sm space-y-4 text-center max-w-lg mx-auto">
+                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl">
+                          <i className="fa-solid fa-video"></i>
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-slate-800">Google Meet 遠隔やり取り機能</h3>
+                          <p className="text-slate-500 text-xs mt-1">下のボタンを押すと、この部屋専用のビデオ通話ページが起動します。<br/>管理画面にあなたが接続した履歴が記録されます。</p>
+                        </div>
+                        {currentMeetLink ? (
+                          <button onClick={handleOpenMeet} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition-all text-sm">
+                            <i className="fa-solid fa-arrow-up-right-from-square"></i> Google Meet を起動して参加
+                          </button>
+                        ) : (
+                          <p className="text-rose-500 text-xs">リンクの読み込み中、またはMeetが登録されていません。</p>
+                        )}
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-dashed text-left">
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">登録中の通話URL</span>
+                          <span className="text-xs text-slate-600 font-mono break-all">{currentMeetLink || "未設定"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 🔒 管理画面（認証ガードロック付き ＋ Meet監視ログ機能） */}
               {activeTab === 'admin' && (
                 <div>
                   {!isAdminAuthenticated ? (
-                    /* パスワード入力フォーム（未認証の場合） */
                     <div className="max-w-md mx-auto py-12 space-y-6 text-center">
                       <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner">
                         <i className="fa-solid fa-lock"></i>
@@ -389,58 +516,79 @@
                       <p className="text-[10px] text-slate-300">※初期設定パスワードは「admin1234」です</p>
                     </div>
                   ) : (
-                    /* 本番の管理画面パネル（認証に成功している場合のみ表示） */
-                    <div className="space-y-6">
+                    <div className="space-y-8">
                       <div className="flex justify-between items-start border-b pb-4">
                         <div>
                           <h2 className="text-xl font-bold text-rose-700 flex items-center gap-2">
                             <i className="fa-solid fa-shield-halved"></i>管理者用コントロールパネル
                           </h2>
-                          <p className="text-slate-500 text-sm mt-0.5">AIがバトンタッチした「未回答の質問リスト」をリアルタイムに管理できます。</p>
+                          <p className="text-slate-500 text-sm mt-0.5">AIからのヘルプ要請と、生徒のGoogle Meet通話アクティビティをリアルタイム監視できます。</p>
                         </div>
                         <button onClick={handleAdminLogout} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">
                           <i className="fa-solid fa-right-from-bracket mr-1"></i> ログアウト
                         </button>
                       </div>
 
+                      {/* セクション1: Google Meet 接続アクティビティ状況 */}
                       <div className="space-y-3">
-                        {adminQuestions.length === 0 ? (
-                          <p className="text-sm text-slate-400 py-8 text-center border-2 border-dashed rounded-xl">現在、対応が必要なエスカレーションはありません。</p>
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-indigo-500"></span> 🔴 ルーム・Google Meet 起動追跡ログ
+                        </h3>
+                        {meetLogs.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">Meetの参加履歴はまだありません。</p>
                         ) : (
-                          adminQuestions.map(aq => (
-                            <div key={aq.id} className="p-4 border-2 border-rose-100 rounded-xl bg-rose-50/20 space-y-2">
-                              <div className="flex justify-between text-xs text-slate-400 font-mono">
-                                <span>ステータス: <strong className="text-rose-600">{aq.status}</strong></span>
-                                <span>{aq.createdAt?.substring(0,16).replace('T', ' ')}</span>
-                              </div>
-                              <p className="text-sm font-bold text-slate-800">🤔 ユーザーからの質問:</p>
-                              <p className="bg-white p-3 rounded-lg border text-sm text-slate-700 shadow-sm font-medium">「 {aq.question} 」</p>
-                              <div className="flex justify-end gap-2 pt-1">
-                                <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all">対応完了（解決済みにする）</button>
-                                <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1.5 transition-all">履歴を削除</button>
-                              </div>
-                            </div>
-                          ))
+                          <div className="overflow-hidden border border-slate-200 rounded-xl shadow-sm bg-white">
+                            <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                              <thead className="bg-slate-50 text-slate-500 font-semibold">
+                                <tr>
+                                  <th className="px-4 py-2.5">参加したユーザー</th>
+                                  <th className="px-4 py-2.5">利用ルーム</th>
+                                  <th className="px-4 py-2.5">ターゲットMeetリンク</th>
+                                  <th className="px-4 py-2.5">接続日時</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 text-slate-700 font-medium">
+                                {meetLogs.map(log => (
+                                  <tr key={log.id} className="hover:bg-slate-50/80">
+                                    <td className="px-4 py-2.5 text-indigo-600 font-bold"><i className="fa-solid fa-user text-[10px] mr-1"></i>{log.user}</td>
+                                    <td className="px-4 py-2.5"><span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] border">{log.room}</span></td>
+                                    <td className="px-4 py-2.5 font-mono text-slate-400 max-w-xs truncate" title={log.meetLink}>{log.meetLink}</td>
+                                    <td className="px-4 py-2.5 text-slate-400">{log.timestamp?.substring(5,16).replace('T', ' ')}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {/* ルーム機能 */}
-              {activeTab === 'room' && (
-                <div className="space-y-6">
-                  <h2 className="text-xl font-bold text-slate-900">ルーム会議室</h2>
-                  {!currentRoom ? (
-                    <div className="bg-slate-50 p-6 rounded-2xl border text-center space-y-4">
-                      <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="ルーム名を入力" className="px-4 py-2 rounded-xl border text-center font-bold" />
-                      <button onClick={() => { if(roomInput.trim()){setCurrentRoom(roomInput.trim()); setRoomInput('');} }} className="bg-indigo-600 text-white font-bold py-2 px-6 rounded-xl block mx-auto">入室する</button>
-                    </div>
-                  ) : (
-                    <div className="p-4 bg-emerald-50 border rounded-xl flex justify-between items-center">
-                      <p className="text-sm font-bold text-emerald-800">ルーム「{currentRoom}」に滞在中</p>
-                      <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold">退室</button>
+                      {/* セクション2: AIからの未対応質問エスカレーション */}
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-500"></span> 🚨 AIヘルプ・未対応質問リスト
+                        </h3>
+                        <div className="space-y-3">
+                          {adminQuestions.length === 0 ? (
+                            <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">現在、対応が必要なAIエスカレーションはありません。</p>
+                          ) : (
+                            adminQuestions.map(aq => (
+                              <div key={aq.id} className="p-4 border-2 border-rose-100 rounded-xl bg-rose-50/20 space-y-2">
+                                <div className="flex justify-between text-xs text-slate-400 font-mono">
+                                  <span>ステータス: <strong className="text-rose-600">{aq.status}</strong></span>
+                                  <span>{aq.createdAt?.substring(0,16).replace('T', ' ')}</span>
+                                </div>
+                                <p className="text-sm font-bold text-slate-800">🤔 ユーザーからの質問:</p>
+                                <p className="bg-white p-3 rounded-lg border text-sm text-slate-700 shadow-sm font-medium">「 {aq.question} 」</p>
+                                <div className="flex justify-end gap-2 pt-1">
+                                  <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all">対応完了（解決済みにする）</button>
+                                  <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1.5 transition-all">履歴を削除</button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
                     </div>
                   )}
                 </div>
