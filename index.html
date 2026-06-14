@@ -28,9 +28,9 @@
   </script>
 
   <script type="text/babel" data-type="module">
-    import { initializeApp } from "firebase/app";
-    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, setDoc, getDoc } from "firebase/firestore";
-    import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBeNYgJzq7fDRSHHJKYmYaae0PtLg3J91s",
@@ -242,29 +242,31 @@
         const roomName = roomInput.trim();
         if (!roomName) return;
 
-        // ルームのドキュメントを確認、なければ新規作成（Meetリンク付与）
-        const roomRef = doc(db, "rooms", roomName);
-        const roomSnap = await getDoc(roomRef);
+        try {
+          const roomRef = doc(db, "rooms", roomName);
+          const roomSnap = await getDoc(roomRef);
 
-        if (!roomSnap.exists()) {
-          // 新規作成の場合、入力されたMeetリンク（空でも可）を設定
-          await setDoc(roomRef, {
-            name: roomName,
-            meetLink: meetLinkInput.trim() || "https://meet.google.com/",
-            createdAt: new Date().toISOString()
-          });
+          if (!roomSnap.exists()) {
+            await setDoc(roomRef, {
+              name: roomName,
+              meetLink: meetLinkInput.trim() || "https://meet.google.com/",
+              createdAt: new Date().toISOString()
+            });
+          }
+
+          setCurrentRoom(roomName);
+          setRoomInput('');
+          setMeetLinkInput('');
+        } catch (error) {
+          console.error("ルーム処理エラー:", error);
+          alert("入室に失敗しました。接続設定を確認してください。");
         }
-
-        setCurrentRoom(roomName);
-        setRoomInput('');
-        setMeetLinkInput('');
       };
 
       // Google Meetを開いた時のログ取得機能
       const handleOpenMeet = async () => {
         if (!currentMeetLink) return;
         
-        // 管理用のログをFirestoreに保存
         await addDoc(collection(db, "meet_logs"), {
           user: nickname,
           room: currentRoom,
@@ -272,7 +274,6 @@
           timestamp: new Date().toISOString()
         });
 
-        // 実際に別タブでGoogle Meetを開く
         window.open(currentMeetLink, '_blank');
       };
 
@@ -286,7 +287,6 @@
               </div>
               
               <div className="flex items-center space-x-4">
-                {/* ニックネーム変更UI */}
                 <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-xl text-xs">
                   <span className="text-slate-500">名前:</span>
                   <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} className="bg-transparent font-bold text-slate-700 w-24 border-b border-transparent focus:border-indigo-500 outline-none" title="管理画面にこの名前で表示されます" />
@@ -430,7 +430,7 @@
                 </div>
               )}
 
-              {/* ルーム機能（Google Meet連携強化） */}
+              {/* ルーム機能（修正完了版） */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <div>
@@ -487,7 +487,7 @@
                 </div>
               )}
 
-              {/* 🔒 管理画面（認証ガードロック付き ＋ Meet監視ログ機能） */}
+              {/* 🔒 管理画面 */}
               {activeTab === 'admin' && (
                 <div>
                   {!isAdminAuthenticated ? (
