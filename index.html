@@ -40,14 +40,14 @@
     import { getFirestore, collection, addDoc, getDocs, query, orderBy } from "firebase/firestore";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-    // --- Firebase 設定 (ご自身のキーに書き換えてください) ---
+    // --- 提供していただいたFirebase設定 ---
     const firebaseConfig = {
-      apiKey: "YOUR_API_KEY_HERE",
-      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      projectId: "YOUR_PROJECT_ID",
-      storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      messagingSenderId: "YOUR_SENDER_ID",
-      appId: "YOUR_APP_ID"
+      apiKey: "AIzaSyBeNYgJzq7fDRSHHJKYmYaae0PtLg3J91s",
+      authDomain: "shareq-b6483.firebaseapp.com",
+      projectId: "shareq-b6483",
+      storageBucket: "shareq-b6483.firebasestorage.app",
+      messagingSenderId: "1006700920095",
+      appId: "1:1006700920095:web:16b93980001ff68f45442a"
     };
 
     // グローバル変数の宣言
@@ -55,19 +55,15 @@
     let auth = null;
     let firebaseInitialized = false;
 
-    // 白画面対策：Firebaseの初期化に失敗してもReactがクラッシュしないようにガード
+    // 白画面対策：安全な初期化
     try {
-      if (firebaseConfig.apiKey && !firebaseConfig.apiKey.includes("YOUR_")) {
-        const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-        auth = getAuth(app);
-        firebaseInitialized = true;
-        console.log("Firebase initialized successfully.");
-      } else {
-        console.warn("Firebase config is placeholder. Running in Offline Mock Mode.");
-      }
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      auth = getAuth(app);
+      firebaseInitialized = true;
+      console.log("Firebase への接続に成功しました！");
     } catch (error) {
-      console.error("Firebase initialization failed:", error);
+      console.error("Firebaseの初期化でエラーが発生しました:", error);
     }
 
     // React Hooks の取得
@@ -86,11 +82,16 @@
       const [options, setOptions] = useState(['', '', '', '']);
       const [correctAnswer, setCorrectAnswer] = useState('');
 
-      // 1. ログイン処理 (Firebase or ゲスト)
+      // 1. ログイン処理
       useEffect(() => {
         if (firebaseInitialized && auth) {
           // 匿名ログインを実行
-          signInAnonymously(auth).catch(err => console.error("Auth error:", err));
+          signInAnonymously(auth)
+            .then((cred) => console.log("匿名ログイン完了 ユーザーID:", cred.user.uid))
+            .catch(err => {
+              console.error("Authentication エラー:", err);
+              alert("FirebaseのAuthentication設定（匿名ログイン）が有効になっていない可能性があります。手順4をご確認ください。");
+            });
           
           // ログイン状態の監視
           const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -101,11 +102,7 @@
           });
           return () => unsubscribe();
         } else {
-          // Firebaseがない場合はローカルの模擬ユーザー
-          setUser({ uid: "mock-user-123", isAnonymous: true });
-          setQuestions([
-            { id: "1", title: "サンプルのクイズ：日本で一番高い山は？", type: "choice", options: ["富士山", "北岳", "奥穂高岳", "間ノ岳"], correctAnswer: "富士山" }
-          ]);
+          setUser({ uid: "mock-user", isAnonymous: true });
         }
       }, []);
 
@@ -114,6 +111,7 @@
         if (!firebaseInitialized || !db) return;
         setLoading(true);
         try {
+          // とりあえず全ユーザー共通、または自分の問題を新しい順に取得
           const q = query(collection(db, "questions"), orderBy("createdAt", "desc"));
           const querySnapshot = await getDocs(q);
           const list = [];
@@ -122,7 +120,11 @@
           });
           setQuestions(list);
         } catch (error) {
-          console.error("Error fetching questions:", error);
+          console.error("Firestoreからのデータ取得エラー:", error);
+          // インデックス未作成や権限エラーの対策
+          if (error.code === "permission-denied") {
+            alert("Firestoreのセキュリティルールが原因でデータが取得できませんでした。手順3の『テストモードで開始』になっているかご確認ください。");
+          }
         } finally {
           setLoading(false);
         }
@@ -149,11 +151,10 @@
             resetForm();
             setActiveTab('questions');
           } catch (error) {
-            console.error("Error adding document: ", error);
-            alert("保存に失敗しました。");
+            console.error("Firestoreへの保存エラー: ", error);
+            alert("Firestoreへの保存に失敗しました。セキュリティルールをご確認ください。");
           }
         } else {
-          // オフライン時のローカル追加
           setQuestions([{ id: Date.now().toString(), ...newQuestion }, ...questions]);
           resetForm();
           setActiveTab('questions');
@@ -178,13 +179,13 @@
                 <span className="text-xl font-bold tracking-tight bg-gradient-to-r block bg-clip-text text-transparent from-indigo-600 to-violet-600">ShareQ</span>
               </div>
               <div className="flex items-center space-x-3">
-                {firebaseInitialized ? (
+                {user ? (
                   <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Connected
                   </span>
                 ) : (
                   <span className="bg-amber-50 text-amber-700 border border-amber-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-400"></span> Local Demo Mode
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span> Connecting...
                   </span>
                 )}
               </div>
@@ -227,24 +228,14 @@
                     <p className="text-slate-500 text-sm mt-1">ShareQ で友達と効率よく問題を共有・復習しましょう。</p>
                   </div>
 
-                  {!firebaseInitialized && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3 text-amber-800 text-sm">
-                      <i className="fa-solid fa-triangle-exclamation text-lg mt-0.5"></i>
-                      <div>
-                        <p className="font-bold">Firebase 設定が未完了です</p>
-                        <p className="mt-0.5 text-amber-700">コード内の `firebaseConfig` を書き換えるまで、作成した問題はブラウザを閉じると消去されます（デモ動作）。</p>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="border border-slate-200 rounded-xl p-5 bg-slate-50">
                       <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">総作成問題数</span>
                       <p className="text-3xl font-bold text-slate-800 mt-2">{questions.length} <span className="text-sm font-normal text-slate-500">問</span></p>
                     </div>
                     <div className="border border-slate-200 rounded-xl p-5 bg-slate-50">
-                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">次回のリマインダー</span>
-                      <p className="text-sm font-medium text-slate-600 mt-3"><i className="fa-regular fa-clock mr-1.5 text-indigo-500"></i>設定されていません</p>
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">ログインID（匿名）</span>
+                      <p className="text-xs font-mono text-slate-600 mt-3 truncate">{user ? user.uid : "読み込み中..."}</p>
                     </div>
                   </div>
                 </div>
@@ -392,7 +383,7 @@
       );
     }
 
-    // Reactアプリのレンダリング起動
+    // アプリケーション起動
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
