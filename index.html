@@ -17,16 +17,6 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="importmap">
-    {
-      "imports": {
-        "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
-        "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js",
-        "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"
-      }
-    }
-  </script>
-
   <script type="text/babel" data-type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -75,9 +65,10 @@
       const [questions, setQuestions] = useState([]);
       const [reminders, setReminders] = useState([]);
       const [adminQuestions, setAdminQuestions] = useState([]);
-      const [meetLogs, setMeetLogs] = useState([]); // 管理画面用のMeetログ
-      
-      // 管理者ログイン状態の管理
+      const [meetLogs, setMeetLogs] = useState([]); 
+      const [availableRooms, setAvailableRooms] = useState([]); // 作成済みルーム一覧
+
+      // 管理者ログイン状態
       const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
       const [passwordInput, setPasswordInput] = useState('');
       const [loginError, setLoginError] = useState('');
@@ -85,8 +76,8 @@
       // ルーム＆選択状態
       const [currentRoom, setCurrentRoom] = useState(null);
       const [roomInput, setRoomInput] = useState('');
-      const [meetLinkInput, setMeetLinkInput] = useState(''); // Meetリンク入力用
-      const [currentMeetLink, setCurrentMeetLink] = useState(''); // 現在のルームのMeetリンク
+      const [meetLinkInput, setMeetLinkInput] = useState(''); 
+      const [currentMeetLink, setCurrentMeetLink] = useState(''); 
       const [selectedAnswers, setSelectedAnswers] = useState({});
       const [aiExplanations, setAiExplanations] = useState({});
       const [aiLoading, setAiLoading] = useState({});
@@ -103,7 +94,6 @@
       const [aiChatResponse, setAiChatResponse] = useState('');
       const [chatLoading, setChatLoading] = useState(false);
 
-      // ユーザーの簡易表示用ニックネーム（管理画面判定用）
       const [nickname, setNickname] = useState(() => localStorage.getItem('shareq_name') || `ゲスト_${Math.floor(1000 + Math.random() * 9000)}`);
 
       useEffect(() => {
@@ -125,9 +115,12 @@
               onSnapshot(query(collection(db, "admin_escalations"), orderBy("createdAt", "desc")), (snap) => {
                 setAdminQuestions(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
-              // 管理用：Meet参加ログの購読
               onSnapshot(query(collection(db, "meet_logs"), orderBy("timestamp", "desc")), (snap) => {
                 setMeetLogs(snap.docs.map(d => ({id: d.id, ...d.data()})));
+              });
+              // リアルタイムに作成済みのルーム一覧を取得
+              onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), (snap) => {
+                setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
             }
           });
@@ -147,7 +140,7 @@
         return () => unsub();
       }, [currentRoom]);
 
-      // 管理者ログイン試行
+      // 管理者ログイン
       const handleAdminLogin = (e) => {
         e.preventDefault();
         if (passwordInput === ADMIN_PASSWORD) {
@@ -236,44 +229,12 @@
         setRemText(''); setRemTime('');
       };
 
-      // ルーム作成または入室
-      const handleJoinOrCreateRoom = async (e) => {
-        e.preventDefault();
-        const roomName = roomInput.trim();
-        if (!roomName) return;
-
-        try {
-          const roomRef = doc(db, "rooms", roomName);
-          const roomSnap = await getDoc(roomRef);
-
-          if (!roomSnap.exists()) {
-            await setDoc(roomRef, {
-              name: roomName,
-              meetLink: meetLinkInput.trim() || "https://meet.google.com/",
-              createdAt: new Date().toISOString()
-            });
-          }
-
-          setCurrentRoom(roomName);
-          setRoomInput('');
-          setMeetLinkInput('');
-        } catch (error) {
-          console.error("ルーム処理エラー:", error);
-          alert("入室に失敗しました。接続設定を確認してください。");
-        }
-      };
-
       // Google Meetを開いた時のログ取得機能
       const handleOpenMeet = async () => {
         if (!currentMeetLink) return;
-        
         await addDoc(collection(db, "meet_logs"), {
-          user: nickname,
-          room: currentRoom,
-          meetLink: currentMeetLink,
-          timestamp: new Date().toISOString()
+          user: nickname, room: currentRoom, meetLink: currentMeetLink, timestamp: new Date().toISOString()
         });
-
         window.open(currentMeetLink, '_blank');
       };
 
@@ -305,7 +266,7 @@
               <button onClick={() => setActiveTab('create')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'create' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-plus w-5"></i> 問題を作る</button>
               <button onClick={() => setActiveTab('questions')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'questions' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-list w-5"></i> 問題一覧・AI採点</button>
               <button onClick={() => setActiveTab('ai-chat')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'ai-chat' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-robot w-5"></i> AI質問箱</button>
-              <button onClick={() => setActiveTab('room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-users w-5"></i> ルーム会議</button>
+              <button onClick={() => setActiveTab('room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-users w-5"></i> ルーム会議 ({availableRooms.length})</button>
               <button onClick={() => setActiveTab('admin')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><i className="fa-solid fa-lock w-5"></i> 管理画面 ({adminQuestions.length + meetLogs.length})</button>
             </nav>
 
@@ -430,30 +391,97 @@
                 </div>
               )}
 
-              {/* ルーム機能（修正完了版） */}
+              {/* ルーム機能（作成と入室を完全に分離） */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">👥 ルーム会議室</h2>
-                    <p className="text-slate-500 text-sm">特定のルームに参加して、紐づいたGoogle Meetの通話リンクでやり取りできます。</p>
+                    <p className="text-slate-500 text-sm">新しくルームを登録するか、作成済みのルーム一覧から選択して入室してください。</p>
                   </div>
                   
                   {!currentRoom ? (
-                    <form onSubmit={handleJoinOrCreateRoom} className="bg-slate-50 p-6 rounded-2xl border text-center space-y-4 max-w-md mx-auto">
-                      <div>
-                        <label className="block text-left text-xs font-bold text-slate-600 mb-1">① ルーム名</label>
-                        <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学Aの部屋" className="w-full px-4 py-2 rounded-xl border text-center font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* 左・中央側：【新規作成専用】フォーム */}
+                      <div className="lg:col-span-2 bg-slate-50 p-5 rounded-2xl border space-y-4">
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                          <i className="fa-solid fa-square-plus text-indigo-600"></i> 新しいルームを新規作成・登録
+                        </h3>
+                        <form onSubmit={async (e) => {
+                          e.preventDefault();
+                          const roomName = roomInput.trim();
+                          if (!roomName) return;
+                          
+                          // すでに同じ名前のルームがないかチェック
+                          const roomRef = doc(db, "rooms", roomName);
+                          const roomSnap = await getDoc(roomRef);
+                          if (roomSnap.exists()) {
+                            alert(`❌ 「${roomName}」はすでに作成されています。右側の一覧から入室するか、別の名前を入力してください。`);
+                            return;
+                          }
+
+                          // 純粋に作成（登録）だけを行う
+                          try {
+                            await setDoc(roomRef, {
+                              name: roomName,
+                              meetLink: meetLinkInput.trim() || "https://meet.google.com/",
+                              createdAt: new Date().toISOString()
+                            });
+                            alert(`🎉 ルーム「${roomName}」を作成しました！右側の一覧から入室してください。`);
+                            setRoomInput('');
+                            setMeetLinkInput('');
+                          } catch (err) {
+                            console.error(err);
+                            alert("ルームの作成に失敗しました。");
+                          }
+                        }} className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-600 mb-1">① ルーム名（重複不可）</label>
+                            <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学演習、質問部屋B" className="w-full px-4 py-2 rounded-xl border font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-600 mb-1">② Google Meetリンク</label>
+                            <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                            <p className="text-[10px] text-slate-400 mt-1">※空欄時はデフォルトのGoogle Meetが適用されます。</p>
+                          </div>
+                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full transition-all shadow-md text-sm">
+                            <i className="fa-solid fa-plus mr-1"></i> ルームを新規作成する（入室はしません）
+                          </button>
+                        </form>
                       </div>
-                      <div>
-                        <label className="block text-left text-xs font-bold text-slate-600 mb-1">② Google Meetリンク（新規ルーム作成時のみ有効）</label>
-                        <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-center text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
-                        <p className="text-[10px] text-slate-400 mt-1 text-left">※空欄のまま入室するとデフォルトのGoogle Meetが登録されます。既に存在する部屋の場合は、元々登録されているMeetに接続します。</p>
+
+                      {/* 右側：【入室専用】作成済みのルーム一覧 */}
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 max-h-[360px] overflow-y-auto">
+                        <h3 className="text-sm font-bold text-slate-800 flex items-center justify-between">
+                          <span><i className="fa-solid fa-right-to-bracket text-emerald-600 mr-1"></i> ルームを選んで入室</span>
+                          <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{availableRooms.length}</span>
+                        </h3>
+                        {availableRooms.length === 0 ? (
+                          <p className="text-xs text-slate-400 text-center py-12 border border-dashed rounded-xl">まだルームがありません。<br/>左のフォームから作成してください。</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {availableRooms.map((rm) => (
+                              <div key={rm.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-emerald-50/50 transition-all flex justify-between items-center group">
+                                <div className="truncate pr-2">
+                                  <p className="text-xs font-bold text-slate-800 truncate">{rm.name}</p>
+                                  <p className="text-[10px] text-slate-400 font-mono truncate" title={rm.meetLink}>{rm.meetLink}</p>
+                                </div>
+                                <button 
+                                  onClick={() => {
+                                    // 選択されたルームに入る（入室処理のみ）
+                                    setCurrentRoom(rm.name);
+                                  }}
+                                  className="shrink-0 bg-white group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 group-hover:border-transparent text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
+                                >
+                                  入室 <i className="fa-solid fa-door-open text-[10px] ml-0.5"></i>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full transition-all shadow-md">
-                        ルームを作成 / 入室する
-                      </button>
-                    </form>
+                    </div>
                   ) : (
+                    /* 入室後の画面 */
                     <div className="space-y-4">
                       <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center">
                         <p className="text-sm font-bold text-emerald-800">
@@ -467,8 +495,8 @@
                           <i className="fa-solid fa-video"></i>
                         </div>
                         <div>
-                          <h3 className="font-bold text-slate-800">Google Meet 遠隔やり取り機能</h3>
-                          <p className="text-slate-500 text-xs mt-1">下のボタンを押すと、この部屋専用のビデオ通話ページが起動します。<br/>管理画面にあなたが接続した履歴が記録されます。</p>
+                          <h3 className="font-bold text-slate-800">Google Meet 遠隔通話</h3>
+                          <p className="text-slate-500 text-xs mt-1">下のボタンを押すと、この部屋専用のビデオ通話ページが起動します。<br/>同時に、管理画面へ接続履歴が安全に記録されます。</p>
                         </div>
                         {currentMeetLink ? (
                           <button onClick={handleOpenMeet} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition-all text-sm">
@@ -500,20 +528,11 @@
                         <p className="text-slate-400 text-xs mt-1">コントロールパネルを開くにはパスワードを入力してください。</p>
                       </div>
                       <form onSubmit={handleAdminLogin} className="space-y-3">
-                        <input 
-                          type="password" 
-                          value={passwordInput} 
-                          onChange={e => setPasswordInput(e.target.value)} 
-                          placeholder="パスワードを入力してください" 
-                          className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800"
-                          required
-                        />
+                        <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="パスワードを入力してください" className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800" required />
                         {loginError && <p className="text-xs text-rose-500 font-medium">{loginError}</p>}
-                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl hover:bg-slate-900 shadow-md text-sm transition-all">
-                          ロックを解除
-                        </button>
+                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl hover:bg-slate-900 shadow-md text-sm transition-all">ロックを解除</button>
                       </form>
-                      <p className="text-[10px] text-slate-300">※初期設定パスワードは「admin1234」です</p>
+                      <p className="text-[10px] text-slate-300">※初期設定パスワードは「Haya1012」です</p>
                     </div>
                   ) : (
                     <div className="space-y-8">
