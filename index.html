@@ -118,10 +118,17 @@
               onSnapshot(query(collection(db, "meet_logs"), orderBy("timestamp", "desc")), (snap) => {
                 setMeetLogs(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
-              // リアルタイムに作成済みのルーム一覧を取得
-              onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), (snap) => {
-                setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
-              });
+              
+              // リアルタイムに作成済みのルーム一覧を取得（エラー検知付き）
+              onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), 
+                (snap) => {
+                  setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                },
+                (error) => {
+                  console.error("ルーム一覧取得エラー:", error);
+                  // インデックス未作成エラーの場合、コンソールに生成用リンクが出ます
+                }
+              );
             }
           });
         }
@@ -391,7 +398,7 @@
                 </div>
               )}
 
-              {/* ルーム機能（作成と入室を完全に分離） */}
+              {/* ルーム機能（作成と入室を完全に分離 ＆ エラー検知強化版） */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <div>
@@ -410,28 +417,31 @@
                           e.preventDefault();
                           const roomName = roomInput.trim();
                           if (!roomName) return;
+                          if (!db) return alert("⚠️ データベースが接続されていません。");
                           
-                          // すでに同じ名前のルームがないかチェック
-                          const roomRef = doc(db, "rooms", roomName);
-                          const roomSnap = await getDoc(roomRef);
-                          if (roomSnap.exists()) {
-                            alert(`❌ 「${roomName}」はすでに作成されています。右側の一覧から入室するか、別の名前を入力してください。`);
-                            return;
-                          }
-
-                          // 純粋に作成（登録）だけを行う
                           try {
+                            // すでに同じ名前のルームがないかチェック
+                            const roomRef = doc(db, "rooms", roomName);
+                            const roomSnap = await getDoc(roomRef);
+                            if (roomSnap.exists()) {
+                              alert(`❌ 「${roomName}」はすでに作成されています。右側の一覧から入室するか、別の名前を入力してください。`);
+                              return;
+                            }
+
+                            // 作成処理を実行
                             await setDoc(roomRef, {
                               name: roomName,
                               meetLink: meetLinkInput.trim() || "https://meet.google.com/",
                               createdAt: new Date().toISOString()
                             });
+                            
                             alert(`🎉 ルーム「${roomName}」を作成しました！右側の一覧から入室してください。`);
                             setRoomInput('');
                             setMeetLinkInput('');
                           } catch (err) {
-                            console.error(err);
-                            alert("ルームの作成に失敗しました。");
+                            console.error("ルーム作成中の詳細エラー:", err);
+                            // 画面に具体的なエラー理由をアラート表示
+                            alert(`⚠️ ルーム作成に失敗しました。\n理由: ${err.message}\n\n※Firestoreのセキュリティルールを確認してください。`);
                           }
                         }} className="space-y-4">
                           <div>
@@ -467,7 +477,6 @@
                                 </div>
                                 <button 
                                   onClick={() => {
-                                    // 選択されたルームに入る（入室処理のみ）
                                     setCurrentRoom(rm.name);
                                   }}
                                   className="shrink-0 bg-white group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 group-hover:border-transparent text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
