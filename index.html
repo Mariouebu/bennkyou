@@ -151,14 +151,12 @@
         setSelectedAnswers(prev => ({ ...prev, [qId]: selectedOpt }));
       };
 
-      // 🛠️ 修正：AIを経由せず、直接管理者の先生へ送信する
       const handleAskAIBox = async (e) => {
         e.preventDefault();
         if (!userQuestion.trim()) return;
         setChatLoading(true);
 
         try {
-          // Firestoreの管理画面用コレクションにダイレクト保存
           await addDoc(collection(db, "admin_escalations"), {
             question: `${nickname}からの質問: ${userQuestion}`, 
             status: "未対応", 
@@ -319,7 +317,6 @@
                 </div>
               )}
 
-              {/* 先生への質問箱 */}
               {activeTab === 'ai-chat' && (
                 <div className="space-y-6">
                   <div>
@@ -327,7 +324,7 @@
                     <p className="text-slate-500 text-sm">わからないことを入力して送信してください。管理画面へ即座に転送されます。</p>
                   </div>
                   <form onSubmit={handleAskAIBox} className="space-y-3">
-                    <textarea value={userQuestion} onChange={e => userQuestion(e.target.value)} placeholder="質問を入力してください" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
+                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力してください" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
                     <button type="submit" disabled={chatLoading} className="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md w-full sm:w-auto">{chatLoading ? '送信中...' : '先生に質問を送る'}</button>
                   </form>
                   {aiChatResponse && (
