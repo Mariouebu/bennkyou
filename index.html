@@ -38,7 +38,7 @@
       firebaseInitialized = true;
     } catch (e) { console.error(e); }
 
-    // --- Gemini AI無料呼び出し関数（修正済みAPIキーを直接組み込み） ---
+    // --- Gemini AI呼び出し関数（元の使い回しキーの形に完全に修正済み） ---
     async function askAI(promptText) {
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${firebaseConfig.apiKey}`, {
@@ -66,14 +66,12 @@
       const [reminders, setReminders] = useState([]);
       const [adminQuestions, setAdminQuestions] = useState([]);
       const [meetLogs, setMeetLogs] = useState([]); 
-      const [availableRooms, setAvailableRooms] = useState([]); // 作成済みルーム一覧
+      const [availableRooms, setAvailableRooms] = useState([]);
 
-      // 管理者ログイン状態
       const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
       const [passwordInput, setPasswordInput] = useState('');
       const [loginError, setLoginError] = useState('');
 
-      // ルーム＆選択状態
       const [currentRoom, setCurrentRoom] = useState(null);
       const [roomInput, setRoomInput] = useState('');
       const [meetLinkInput, setMeetLinkInput] = useState(''); 
@@ -82,7 +80,6 @@
       const [aiExplanations, setAiExplanations] = useState({});
       const [aiLoading, setAiLoading] = useState({});
 
-      // 各種フォーム
       const [title, setTitle] = useState('');
       const [type, setType] = useState('choice');
       const [options, setOptions] = useState(['', '', '', '']);
@@ -118,22 +115,14 @@
               onSnapshot(query(collection(db, "meet_logs"), orderBy("timestamp", "desc")), (snap) => {
                 setMeetLogs(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
-              
-              // リアルタイムに作成済みのルーム一覧を取得（エラー検知付き）
-              onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), 
-                (snap) => {
-                  setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
-                },
-                (error) => {
-                  console.error("ルーム一覧取得エラー:", error);
-                }
-              );
+              onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), (snap) => {
+                setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
+              });
             }
           });
         }
       }, []);
 
-      // ルームのMeetリンクのリアルタイム監視
       useEffect(() => {
         if (!currentRoom || !db) return;
         const unsub = onSnapshot(doc(db, "rooms", currentRoom), (docSnap) => {
@@ -146,7 +135,6 @@
         return () => unsub();
       }, [currentRoom]);
 
-      // 管理者ログイン
       const handleAdminLogin = (e) => {
         e.preventDefault();
         if (passwordInput === ADMIN_PASSWORD) {
@@ -158,13 +146,11 @@
         }
       };
 
-      // 管理者ログアウト
       const handleAdminLogout = () => {
         setIsAdminAuthenticated(false);
         setActiveTab('dashboard');
       };
 
-      // 問題追加
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (!title.trim()) return alert("問題文を入力してください");
@@ -179,7 +165,6 @@
         setActiveTab('questions');
       };
 
-      // AI採点
       const handleAnswerQuiz = async (qId, selectedOpt, correctOpt) => {
         setSelectedAnswers(prev => ({ ...prev, [qId]: selectedOpt }));
         setAiLoading(prev => ({ ...prev, [qId]: true }));
@@ -199,7 +184,6 @@
         setAiLoading(prev => ({ ...prev, [qId]: false }));
       };
 
-      // AI質問箱
       const handleAskAIBox = async (e) => {
         e.preventDefault();
         if (!userQuestion.trim()) return;
@@ -222,7 +206,6 @@
         setChatLoading(false);
       };
 
-      // リマインダー
       const handleReminderSubmit = async (e) => {
         e.preventDefault();
         if (!remText.trim() || !remTime) return;
@@ -235,7 +218,6 @@
         setRemText(''); setRemTime('');
       };
 
-      // Google Meetを開いた時のログ取得機能
       const handleOpenMeet = async () => {
         if (!currentMeetLink) return;
         await addDoc(collection(db, "meet_logs"), {
@@ -256,7 +238,7 @@
               <div className="flex items-center space-x-4">
                 <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-xl text-xs">
                   <span className="text-slate-500">名前:</span>
-                  <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} className="bg-transparent font-bold text-slate-700 w-24 border-b border-transparent focus:border-indigo-500 outline-none" title="管理画面にこの名前で表示されます" />
+                  <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} className="bg-transparent font-bold text-slate-700 w-24 border-b border-transparent focus:border-indigo-500 outline-none" />
                 </div>
                 {currentRoom && <span className="bg-indigo-50 text-indigo-700 text-xs px-3 py-1.5 rounded-full font-bold"><i className="fa-solid fa-door-open mr-1"></i> {currentRoom}</span>}
                 <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
@@ -278,7 +260,6 @@
 
             <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[400px]">
               
-              {/* ダッシュボード */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
                   <div>
@@ -304,7 +285,6 @@
                 </div>
               )}
 
-              {/* 問題の新規作成 */}
               {activeTab === 'create' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-slate-900">新しい問題の作成 {currentRoom && `(Room: ${currentRoom})`}</h2>
@@ -341,7 +321,6 @@
                 </div>
               )}
 
-              {/* 問題一覧 ＆ AI採点 */}
               {activeTab === 'questions' && (
                 <div className="space-y-6">
                   <h2 className="text-xl font-bold text-slate-900">問題一覧とAI即時採点</h2>
@@ -377,7 +356,6 @@
                 </div>
               )}
 
-              {/* AI質問箱 */}
               {activeTab === 'ai-chat' && (
                 <div className="space-y-6">
                   <div>
@@ -385,7 +363,7 @@
                     <p className="text-slate-500 text-sm">勉強の疑問を質問してください。AIが降参した内容は自動で管理者の先生へ送信されます。</p>
                   </div>
                   <form onSubmit={handleAskAIBox} className="space-y-3">
-                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力 (例: なぜ光は1秒間に地球を7周半も進めるの？)" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
+                    <textarea value={userQuestion} onChange={e => userQuestion(e.target.value)} placeholder="質問を入力 (例: なぜ光は1秒間に地球を7周半も進めるの？)" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
                     <button type="submit" disabled={chatLoading} className="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md w-full sm:w-auto">{chatLoading ? '🤖 思考中...' : 'AIに質問する'}</button>
                   </form>
                   {aiChatResponse && (
@@ -397,7 +375,6 @@
                 </div>
               )}
 
-              {/* ルーム機能 */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <div>
@@ -407,7 +384,6 @@
                   
                   {!currentRoom ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      {/* 左・中央側：【新規作成専用】フォーム */}
                       <div className="lg:col-span-2 bg-slate-50 p-5 rounded-2xl border space-y-4">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                           <i className="fa-solid fa-square-plus text-indigo-600"></i> 新しいルームを新規作成・登録
@@ -422,7 +398,7 @@
                             const roomRef = doc(db, "rooms", roomName);
                             const roomSnap = await getDoc(roomRef);
                             if (roomSnap.exists()) {
-                              alert(`❌ 「${roomName}」はすでに作成されています。右側の一覧から入室するか、別の名前を入力してください。`);
+                              alert(`❌ 「${roomName}」はすでに作成されています。`);
                               return;
                             }
 
@@ -432,53 +408,42 @@
                               createdAt: new Date().toISOString()
                             });
                             
-                            alert(`🎉 ルーム「${roomName}」を作成しました！右側の一覧から入室してください。`);
+                            alert(`🎉 ルーム「${roomName}」を作成しました！`);
                             setRoomInput('');
                             setMeetLinkInput('');
                           } catch (err) {
-                            console.error("ルーム作成中の詳細エラー:", err);
                             alert(`⚠️ ルーム作成に失敗しました。\n理由: ${err.message}`);
                           }
                         }} className="space-y-4">
                           <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">① ルーム名（重複不可）</label>
-                            <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学演習、質問部屋B" className="w-full px-4 py-2 rounded-xl border font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
+                            <label className="block text-xs font-bold text-slate-600 mb-1">① ルーム名</label>
+                            <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学演習" className="w-full px-4 py-2 rounded-xl border font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
                           </div>
                           <div>
                             <label className="block text-xs font-bold text-slate-600 mb-1">② Google Meetリンク</label>
                             <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
-                            <p className="text-[10px] text-slate-400 mt-1">※空欄時はデフォルトのGoogle Meetが適用されます。</p>
                           </div>
-                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full transition-all shadow-md text-sm">
-                            <i className="fa-solid fa-plus mr-1"></i> ルームを新規作成する（入室はしません）
+                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full shadow-md text-sm">
+                            <i className="fa-solid fa-plus mr-1"></i> ルームを新規作成する
                           </button>
                         </form>
                       </div>
 
-                      {/* 右側：【入室専用】作成済みのルーム一覧 */}
                       <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 max-h-[360px] overflow-y-auto">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center justify-between">
                           <span><i className="fa-solid fa-right-to-bracket text-emerald-600 mr-1"></i> ルームを選んで入室</span>
                           <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{availableRooms.length}</span>
                         </h3>
                         {availableRooms.length === 0 ? (
-                          <p className="text-xs text-slate-400 text-center py-12 border border-dashed rounded-xl">まだルームがありません。<br/>左のフォームから作成してください。</p>
+                          <p className="text-xs text-slate-400 text-center py-12 border border-dashed rounded-xl">まだルームがありません。</p>
                         ) : (
                           <div className="space-y-2">
                             {availableRooms.map((rm) => (
-                              <div key={rm.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-emerald-50/50 transition-all flex justify-between items-center group">
+                              <div key={rm.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-emerald-50/50 flex justify-between items-center group">
                                 <div className="truncate pr-2">
                                   <p className="text-xs font-bold text-slate-800 truncate">{rm.name}</p>
-                                  <p className="text-[10px] text-slate-400 font-mono truncate" title={rm.meetLink}>{rm.meetLink}</p>
                                 </div>
-                                <button 
-                                  onClick={() => {
-                                    setCurrentRoom(rm.name);
-                                  }}
-                                  className="shrink-0 bg-white group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 group-hover:border-transparent text-xs font-bold px-3 py-1.5 rounded-lg transition-all"
-                                >
-                                  入室 <i className="fa-solid fa-door-open text-[10px] ml-0.5"></i>
-                                </button>
+                                <button onClick={() => setCurrentRoom(rm.name)} className="bg-white group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 text-xs font-bold px-3 py-1.5 rounded-lg">入室</button>
                               </div>
                             ))}
                           </div>
@@ -486,97 +451,67 @@
                       </div>
                     </div>
                   ) : (
-                    /* 入室後の画面 */
                     <div className="space-y-4">
                       <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center">
-                        <p className="text-sm font-bold text-emerald-800">
-                          <i className="fa-solid fa-door-open mr-1.5"></i>ルーム「<strong>{currentRoom}</strong>」に滞在中
-                        </p>
-                        <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold transition-all">退室する</button>
+                        <p className="text-sm font-bold text-emerald-800">ルーム「<strong>{currentRoom}</strong>」に滞在中</p>
+                        <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold">退室する</button>
                       </div>
 
                       <div className="border border-slate-200 rounded-2xl p-6 bg-white shadow-sm space-y-4 text-center max-w-lg mx-auto">
-                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl">
-                          <i className="fa-solid fa-video"></i>
-                        </div>
+                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl"><i className="fa-solid fa-video"></i></div>
                         <div>
                           <h3 className="font-bold text-slate-800">Google Meet 遠隔通話</h3>
-                          <p className="text-slate-500 text-xs mt-1">下のボタンを押すと、この部屋専用のビデオ通話ページが起動します。<br/>同時に、管理画面へ接続履歴が安全に記録されます。</p>
                         </div>
                         {currentMeetLink ? (
-                          <button onClick={handleOpenMeet} className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition-all text-sm">
-                            <i className="fa-solid fa-arrow-up-right-from-square"></i> Google Meet を起動して参加
-                          </button>
+                          <button onClick={handleOpenMeet} className="bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl text-sm"><i className="fa-solid fa-arrow-up-right-from-square"></i> Google Meet を起動して参加</button>
                         ) : (
-                          <p className="text-rose-500 text-xs">リンクの読み込み中、またはMeetが登録されていません。</p>
+                          <p className="text-rose-500 text-xs">Meetが登録されていません。</p>
                         )}
-                        <div className="bg-slate-50 p-2.5 rounded-xl border border-dashed text-left">
-                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block mb-0.5">登録中の通話URL</span>
-                          <span className="text-xs text-slate-600 font-mono break-all">{currentMeetLink || "未設定"}</span>
-                        </div>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* 🔒 管理画面 */}
               {activeTab === 'admin' && (
                 <div>
                   {!isAdminAuthenticated ? (
                     <div className="max-w-md mx-auto py-12 space-y-6 text-center">
-                      <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner">
-                        <i className="fa-solid fa-lock"></i>
-                      </div>
-                      <div>
-                        <h2 className="text-lg font-bold text-slate-900">管理者認証が必要です</h2>
-                        <p className="text-slate-400 text-xs mt-1">コントロールパネルを開くにはパスワードを入力してください。</p>
-                      </div>
+                      <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner"><i className="fa-solid fa-lock"></i></div>
                       <form onSubmit={handleAdminLogin} className="space-y-3">
                         <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="パスワードを入力してください" className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800" required />
                         {loginError && <p className="text-xs text-rose-500 font-medium">{loginError}</p>}
-                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl hover:bg-slate-900 shadow-md text-sm transition-all">ロックを解除</button>
+                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl text-sm">ロックを解除</button>
                       </form>
-                      <p className="text-[10px] text-slate-300">※初期設定パスワードは「Haya1012」です</p>
                     </div>
                   ) : (
                     <div className="space-y-8">
                       <div className="flex justify-between items-start border-b pb-4">
                         <div>
-                          <h2 className="text-xl font-bold text-rose-700 flex items-center gap-2">
-                            <i className="fa-solid fa-shield-halved"></i>管理者用コントロールパネル
-                          </h2>
-                          <p className="text-slate-500 text-sm mt-0.5">AIからのヘルプ要請と、生徒のGoogle Meet通話アクティビティをリアルタイム監視できます。</p>
+                          <h2 className="text-xl font-bold text-rose-700 flex items-center gap-2"><i className="fa-solid fa-shield-halved"></i>管理者用コントロールパネル</h2>
                         </div>
-                        <button onClick={handleAdminLogout} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">
-                          <i className="fa-solid fa-right-from-bracket mr-1"></i> ログアウト
-                        </button>
+                        <button onClick={handleAdminLogout} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold">ログアウト</button>
                       </div>
 
-                      {/* セクション1: Google Meet 接続アクティビティ状況 */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500"></span> 🔴 ルーム・Google Meet 起動追跡ログ
-                        </h3>
+                        <h3 className="text-sm font-bold text-slate-800">🔴 ルーム・Google Meet 起動追跡ログ</h3>
                         {meetLogs.length === 0 ? (
                           <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">Meetの参加履歴はまだありません。</p>
                         ) : (
-                          <div className="overflow-hidden border border-slate-200 rounded-xl shadow-sm bg-white">
+                          <div className="overflow-hidden border border-slate-200 rounded-xl bg-white">
                             <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
                               <thead className="bg-slate-50 text-slate-500 font-semibold">
                                 <tr>
-                                  <th className="px-4 py-2.5">参加したユーザー</th>
+                                  <th className="px-4 py-2.5">参加ユーザー</th>
                                   <th className="px-4 py-2.5">利用ルーム</th>
-                                  <th className="px-4 py-2.5">ターゲットMeetリンク</th>
                                   <th className="px-4 py-2.5">接続日時</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-200 text-slate-700 font-medium">
                                 {meetLogs.map(log => (
-                                  <tr key={log.id} className="hover:bg-slate-50/80">
-                                    <td className="px-4 py-2.5 text-indigo-600 font-bold"><i className="fa-solid fa-user text-[10px] mr-1"></i>{log.user}</td>
+                                  <tr key={log.id}>
+                                    <td className="px-4 py-2.5 text-indigo-600 font-bold">{log.user}</td>
                                     <td className="px-4 py-2.5"><span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] border">{log.room}</span></td>
-                                    <td className="px-4 py-2.5 font-mono text-slate-400 max-w-xs truncate" title={log.meetLink}>{log.meetLink}</td>
                                     <td className="px-4 py-2.5 text-slate-400">{log.timestamp?.substring(5,16).replace('T', ' ')}</td>
                                   </tr>
                                 ))}
@@ -586,26 +521,19 @@
                         )}
                       </div>
 
-                      {/* セクション2: AIからの未対応質問エスカレーション */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-rose-500"></span> 🚨 AIヘルプ・未対応質問リスト
-                        </h3>
+                        <h3 className="text-sm font-bold text-slate-800">🚨 AIヘルプ・未対応質問リスト</h3>
                         <div className="space-y-3">
                           {adminQuestions.length === 0 ? (
                             <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">現在、対応が必要なAIエスカレーションはありません。</p>
                           ) : (
                             adminQuestions.map(aq => (
                               <div key={aq.id} className="p-4 border-2 border-rose-100 rounded-xl bg-rose-50/20 space-y-2">
-                                <div className="flex justify-between text-xs text-slate-400 font-mono">
-                                  <span>ステータス: <strong className="text-rose-600">{aq.status}</strong></span>
-                                  <span>{aq.createdAt?.substring(0,16).replace('T', ' ')}</span>
-                                </div>
                                 <p className="text-sm font-bold text-slate-800">🤔 ユーザーからの質問:</p>
-                                <p className="bg-white p-3 rounded-lg border text-sm text-slate-700 shadow-sm font-medium">「 {aq.question} 」</p>
+                                <p className="bg-white p-3 rounded-lg border text-sm text-slate-700">「 {aq.question} 」</p>
                                 <div className="flex justify-end gap-2 pt-1">
-                                  <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all">対応完了（解決済みにする）</button>
-                                  <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-400 hover:text-rose-600 text-xs font-bold px-2 py-1.5 transition-all">履歴を削除</button>
+                                  <button onClick={async () => await updateDoc(doc(db, "admin_escalations", aq.id), {status: "回答済み"})} className="bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg等">対応完了（解決済みにする）</button>
+                                  <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-slate-400 text-xs font-bold px-2 py-1.5">削除</button>
                                 </div>
                               </div>
                             ))
