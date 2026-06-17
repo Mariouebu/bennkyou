@@ -3,25 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShareQ - 先生と直通質問箱＆回答システム</title>
+  <title>ShareQ - スーパー教育サポートシステム</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>body { font-family: 'Plus Jakarta Sans', 'Noto Sans JP', sans-serif; }</style>
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', 'Noto Sans JP', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 3px;
+    }
+  </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen">
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
 
   <div id="root"></div>
 
+  <!-- React & Babel -->
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script>
+    // BabelのJSXコンパイル設定をクラシックモード（React.createElement）に強制するプリセットを登録
+    Babel.registerPreset('classic-react', {
+      presets: [
+        [Babel.availablePresets['react'], { runtime: 'classic' }]
+      ]
+    });
+  </script>
 
-  <script type="text/babel" data-type="module">
+  <!-- 登録したクラシック用プリセットを data-presets に指定 -->
+  <script type="text/babel" data-presets="classic-react" data-type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, orderBy, onSnapshot, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
     import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
+    // Firebaseの初期設定
     const firebaseConfig = {
       apiKey: "AIzaSyBeNYgJzq7fDRSHHJKYmYaae0PtLg3J91s",
       authDomain: "shareq-b6483.firebaseapp.com",
@@ -31,31 +57,63 @@
       appId: "1:1006700920095:web:16b93980001ff68f45442a"
     };
 
-    let db = null; let auth = null; let firebaseInitialized = false;
+    let db = null;
+    let auth = null;
+    let firebaseInitialized = false;
+
     try {
       const app = initializeApp(firebaseConfig);
-      db = getFirestore(app); auth = getAuth(app);
+      db = getFirestore(app);
+      auth = getAuth(app);
       firebaseInitialized = true;
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.warn("Firebase接続が設定されていません。デモ（インメモリ）モードで動作します。", e);
+    }
 
     const { useState, useEffect } = React;
-
-    // 🔒 管理者用ログインパスワード
     const ADMIN_PASSWORD = "Haya1012";
+
+    // 💡 体験用の初期モックデータ（データベース接続がない場合・オフライン時用）
+    // 【修正】初期モックは完全に空にして、先生が追加・更新するまで表示しないようにします
+    const initialMockAnnouncements = [];
+
+    const initialMockTests = [
+      { id: "mock-test-1", title: "📝 小テスト：分数と小数の計算", q1: "0.25 を分数で表すと？", a1: "1/4", q2: "1/2 + 0.5 の計算結果は？", a2: "1", createdAt: new Date().toISOString() }
+    ];
+
+    const initialMockQuestions = [
+      { id: "mock-q1", title: "日本のシンボルとも言われる、日本で一番高い山は何山？", type: "choice", options: ["阿蘇山", "富士山", "筑波山", "浅間山"], correctAnswer: "富士山", createdAt: new Date().toISOString(), room: "社会科部屋" }
+    ];
+
+    // 動的に追加・管理されるおすすめリンク集の初期データ
+    const initialMockLinks = [
+      { id: "mock-link-1", title: "文部科学省 子供の学び応援サイト", url: "https://www.mext.go.jp/a_menu/ikusei/gakushu/index.htm", description: "お家でできる自習コンテンツや動画教材がたくさん紹介されています。", icon: "fa-graduation-cap", color: "indigo", createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "mock-link-2", title: "NHK for School", url: "https://www.nhk.or.jp/school/", description: "各教科書に合わせた、分かりやすく面白い動画教材が見放題です。", icon: "fa-video", color: "emerald", createdAt: "2026-01-01T00:00:01.000Z" },
+      { id: "mock-link-3", title: "なるほど統計学園（キッズ）", url: "https://www.e-stat.go.jp/kids", description: "日本のさまざまなデータをグラフで学べ、自由研究のネタ探しに便利です。", icon: "fa-chart-pie", color: "amber", createdAt: "2026-01-01T00:00:02.000Z" },
+      { id: "mock-link-4", title: "Scratch (スクラッチ)", url: "https://scratch.mit.edu/", description: "世界中の人が使っている有名な子供向けビジュアルプログラミングサイトです。", icon: "fa-code", color: "rose", createdAt: "2026-01-01T00:00:03.000Z" }
+    ];
 
     function App() {
       const [user, setUser] = useState(null);
       const [activeTab, setActiveTab] = useState('dashboard');
-      const [questions, setQuestions] = useState([]);
+      
+      // データ管理用のステート
+      const [questions, setQuestions] = useState(initialMockQuestions);
       const [reminders, setReminders] = useState([]);
       const [adminQuestions, setAdminQuestions] = useState([]);
       const [meetLogs, setMeetLogs] = useState([]); 
       const [availableRooms, setAvailableRooms] = useState([]);
+      const [announcements, setAnnouncements] = useState(initialMockAnnouncements);
+      const [tests, setTests] = useState(initialMockTests);
+      const [learningLinks, setLearningLinks] = useState(initialMockLinks);
+      const [isUsingFirebase, setIsUsingFirebase] = useState(false);
 
+      // 管理者ログイン状態
       const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
       const [passwordInput, setPasswordInput] = useState('');
       const [loginError, setLoginError] = useState('');
 
+      // 入力フォーム用の状態
       const [currentRoom, setCurrentRoom] = useState(null);
       const [roomInput, setRoomInput] = useState('');
       const [meetLinkInput, setMeetLinkInput] = useState(''); 
@@ -73,24 +131,43 @@
       const [userQuestion, setUserQuestion] = useState('');
       const [submitMessage, setSubmitMessage] = useState('');
       const [chatLoading, setChatLoading] = useState(false);
-      
-      // 先生の入力用テキストを管理する状態
       const [adminReplies, setAdminReplies] = useState({});
 
-      const [nickname, setNickname] = useState(() => localStorage.getItem('shareq_name') || `ゲスト_${Math.floor(1000 + Math.random() * 9000)}`);
+      // お知らせ・テスト・リンク追加用フォーム状態
+      const [noticeInput, setNoticeInput] = useState('');
+      const [testTitle, setTestTitle] = useState('');
+      const [testQ1, setTestQ1] = useState('');
+      const [testA1, setTestA1] = useState('');
+      const [testQ2, setTestQ2] = useState('');
+      const [testA2, setTestA2] = useState('');
+
+      // 【新機能】学習リンク追加用フォーム状態
+      const [linkTitle, setLinkTitle] = useState('');
+      const [linkUrl, setLinkUrl] = useState('');
+      const [linkDesc, setLinkDesc] = useState('');
+      
+      // 生徒のテスト解答状態
+      const [studentAnswers, setStudentAnswers] = useState({});
+      const [testScore, setTestScore] = useState({});
+
+      const [nickname, setNickname] = useState(() => localStorage.getItem('shareq_name') || `生徒_${Math.floor(1000 + Math.random() * 9000)}`);
 
       useEffect(() => {
         localStorage.setItem('shareq_name', nickname);
       }, [nickname]);
 
       useEffect(() => {
-        if (firebaseInitialized && auth) {
-          signInAnonymously(auth).catch(console.error);
+        if (firebaseInitialized && auth && db) {
+          setIsUsingFirebase(true);
+          signInAnonymously(auth).catch((err) => {
+            console.error("匿名サインインエラー:", err);
+            setIsUsingFirebase(false);
+          });
           onAuthStateChanged(auth, (currentUser) => {
             if (currentUser) {
               setUser(currentUser);
               onSnapshot(query(collection(db, "questions"), orderBy("createdAt", "desc")), (snap) => {
-                setQuestions(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                if (!snap.empty) setQuestions(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
               onSnapshot(query(collection(db, "reminders"), orderBy("time", "asc")), (snap) => {
                 setReminders(snap.docs.map(d => ({id: d.id, ...d.data()})));
@@ -102,7 +179,30 @@
                 setMeetLogs(snap.docs.map(d => ({id: d.id, ...d.data()})));
               });
               onSnapshot(query(collection(db, "rooms"), orderBy("createdAt", "desc")), (snap) => {
-                setAvailableRooms(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                // 🕒 ルームの期限チェック（今日のルームだけを残す）
+                const todayStr = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+                const allRooms = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                const activeRooms = allRooms.filter(r => r.date === todayStr);
+                setAvailableRooms(activeRooms);
+              });
+              onSnapshot(query(collection(db, "announcements"), orderBy("createdAt", "desc")), (snap) => {
+                // DBにお知らせがある場合は同期、無い場合は空にする
+                if (!snap.empty) {
+                  setAnnouncements(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                } else {
+                  setAnnouncements([]);
+                }
+              });
+              onSnapshot(query(collection(db, "tests"), orderBy("createdAt", "desc")), (snap) => {
+                if (!snap.empty) setTests(snap.docs.map(d => ({id: d.id, ...d.data()})));
+              });
+              onSnapshot(query(collection(db, "links"), orderBy("createdAt", "desc")), (snap) => {
+                if (!snap.empty) {
+                  setLearningLinks(snap.docs.map(d => ({id: d.id, ...d.data()})));
+                } else {
+                  // DBがまだ作られていない場合は初期設定のリンクを表示
+                  setLearningLinks(initialMockLinks);
+                }
               });
             }
           });
@@ -110,7 +210,7 @@
       }, []);
 
       useEffect(() => {
-        if (!currentRoom || !db) return;
+        if (!currentRoom || !db || !isUsingFirebase) return;
         const unsub = onSnapshot(doc(db, "rooms", currentRoom), (docSnap) => {
           if (docSnap.exists()) {
             setCurrentMeetLink(docSnap.data().meetLink || '');
@@ -119,174 +219,464 @@
           }
         });
         return () => unsub();
-      }, [currentRoom]);
+      }, [currentRoom, isUsingFirebase]);
 
       const handleAdminLogin = (e) => {
         e.preventDefault();
-        if (passwordInput === ADMIN_PASSWORD) {
-          setIsAdminAuthenticated(true);
-          setLoginError('');
-          setPasswordInput('');
-        } else {
-          setLoginError('❌ パスワードが正しくありません。');
+        if (passwordInput === ADMIN_PASSWORD) { 
+          setIsAdminAuthenticated(true); 
+          setLoginError(''); 
+          setPasswordInput(''); 
+        } else { 
+          setLoginError('❌ パスワードが正しくありません。'); 
         }
       };
 
-      const handleAdminLogout = () => {
-        setIsAdminAuthenticated(false);
-        setActiveTab('dashboard');
+      const handleAdminLogout = () => { 
+        setIsAdminAuthenticated(false); 
+        setActiveTab('dashboard'); 
       };
 
+      // クイズを登録する関数
       const handleSubmit = async (e) => {
         e.preventDefault();
         if (!title.trim()) return alert("問題文を入力してください");
-        if (type === 'choice' && !correctAnswer) return alert("正解の選択肢を選んでください");
-
-        await addDoc(collection(db, "questions"), {
-          title, type, options: type === 'choice' ? options.filter(o => o.trim() !== '') : [],
+        
+        const newQuiz = {
+          title, 
+          type, 
+          options: type === 'choice' ? options.filter(o => o.trim() !== '') : [],
           correctAnswer: type === 'choice' ? correctAnswer : (correctAnswer === 'true'),
-          createdAt: new Date().toISOString(), room: currentRoom
-        });
+          createdAt: new Date().toISOString(), 
+          room: currentRoom || "共通ルーム"
+        };
+
+        if (isUsingFirebase) {
+          await addDoc(collection(db, "questions"), newQuiz);
+        } else {
+          // モックモード
+          setQuestions(prev => [ { id: `mock-q-${Date.now()}`, ...newQuiz }, ...prev ]);
+        }
         setTitle(''); setOptions(['', '', '', '']); setCorrectAnswer('');
         setActiveTab('questions');
       };
 
-      const handleAnswerQuiz = (qId, selectedOpt, correctOpt) => {
+      const handleAnswerQuiz = (qId, selectedOpt) => {
         setSelectedAnswers(prev => ({ ...prev, [qId]: selectedOpt }));
       };
 
-      // 生徒が先生へ質問を送信する
+      // 生徒から先生への質問を送信する
       const handleAskAIBox = async (e) => {
         e.preventDefault();
         if (!userQuestion.trim()) return;
         setChatLoading(true);
 
+        const newEscalation = {
+          studentName: nickname, 
+          question: userQuestion, 
+          status: "未対応", 
+          reply: "", 
+          createdAt: new Date().toISOString()
+        };
+
         try {
-          await addDoc(collection(db, "admin_escalations"), {
-            studentName: nickname,
-            question: userQuestion, 
-            status: "未対応",
-            reply: "",
-            createdAt: new Date().toISOString()
-          });
-          setSubmitMessage(`📩 先生へ送信しました！下に「先生からの回答」が表示されるのをお待ちください。`);
+          if (isUsingFirebase) {
+            await addDoc(collection(db, "admin_escalations"), newEscalation);
+          } else {
+            setAdminQuestions(prev => [ { id: `mock-es-${Date.now()}`, ...newEscalation }, ...prev ]);
+          }
+          setSubmitMessage(`📩 先生へ送信しました！下に解説が表示されるのをお待ちください。`);
           setUserQuestion('');
-        } catch (error) {
-          console.error(error);
-          setSubmitMessage("❌ 送信に失敗しました。");
+        } catch (error) { 
+          setSubmitMessage("❌ 送信に失敗しました。"); 
         }
         setChatLoading(false);
       };
 
-      // 🛠️ 先生が解説・回答を書き込んで返信する関数
+      // 先生が解説・回答を書き込んで返信する
       const handleSendReply = async (qId) => {
         const replyText = adminReplies[qId];
-        if (!replyText || !replyText.trim()) return alert("解説・回答を入力してください");
-
+        if (!replyText || !replyText.trim()) return alert("解説を入力してください");
+        
         try {
-          await updateDoc(doc(db, "admin_escalations", qId), {
-            status: "回答済み",
-            reply: replyText
-          });
+          if (isUsingFirebase) {
+            await updateDoc(doc(db, "admin_escalations", qId), { status: "回答済み", reply: replyText });
+          } else {
+            setAdminQuestions(prev => prev.map(q => q.id === qId ? { ...q, status: "回答済み", reply: replyText } : q));
+          }
           alert("🎉 本人へ解説を送信しました！");
-        } catch (error) {
-          console.error(error);
-          alert("⚠️ 送信に失敗しました。");
+        } catch (error) { 
+          alert("⚠️ 送信に失敗しました。"); 
         }
       };
 
+      // 今日のお知らせを更新する
+      const handleAddNotice = async (e) => {
+        e.preventDefault();
+        if (!noticeInput.trim()) return;
+        
+        const newNotice = {
+          text: noticeInput, 
+          createdAt: new Date().toISOString()
+        };
+
+        if (isUsingFirebase) {
+          await addDoc(collection(db, "announcements"), newNotice);
+        } else {
+          setAnnouncements([ { id: `mock-ann-${Date.now()}`, ...newNotice } ]);
+        }
+        setNoticeInput('');
+        alert("📢 今日のお知らせを更新しました！");
+      };
+
+      // 【新機能】先生用：おすすめリンクの追加
+      const handleAddLink = async (e) => {
+        e.preventDefault();
+        if (!linkTitle.trim() || !linkUrl.trim()) return alert("サイト名とURLを入力してください");
+
+        const newLink = {
+          title: linkTitle,
+          url: linkUrl,
+          description: linkDesc,
+          icon: "fa-globe", // デフォルトで地球儀アイコン
+          color: "indigo",
+          createdAt: new Date().toISOString()
+        };
+
+        if (isUsingFirebase) {
+          await addDoc(collection(db, "links"), newLink);
+        } else {
+          setLearningLinks(prev => [ { id: `mock-link-${Date.now()}`, ...newLink }, ...prev ]);
+        }
+        setLinkTitle(''); setLinkUrl(''); setLinkDesc('');
+        alert("🌐 おすすめ学習リンクを追加しました！");
+      };
+
+      // 【新機能】先生用：おすすめリンクの削除
+      const handleDeleteLink = async (id) => {
+        if (!confirm("本当にこのリンクを削除しますか？")) return;
+        
+        if (isUsingFirebase) {
+          await deleteDoc(doc(db, "links", id));
+        } else {
+          setLearningLinks(prev => prev.filter(l => l.id !== id));
+        }
+      };
+
+      // 先生用小テスト作成
+      const handleCreateTest = async (e) => {
+        e.preventDefault();
+        if (!testTitle.trim() || !testQ1.trim() || !testA1.trim()) return alert("必須項目を入れてください");
+        
+        const newTest = {
+          title: testTitle, 
+          q1: testQ1, 
+          a1: testA1, 
+          q2: testQ2, 
+          a2: testA2, 
+          createdAt: new Date().toISOString()
+        };
+
+        if (isUsingFirebase) {
+          await addDoc(collection(db, "tests"), newTest);
+        } else {
+          setTests(prev => [ { id: `mock-test-${Date.now()}`, ...newTest }, ...prev ]);
+        }
+        setTestTitle(''); setTestQ1(''); setTestA1(''); setTestQ2(''); setTestA2('');
+        alert("📝 テストを配信しました！");
+      };
+
+      // 生徒のテスト採点
+      const handleGradeTest = (testId, a1Correct, a2Correct) => {
+        let score = 0;
+        const ans1 = studentAnswers[`${testId}_1`]?.trim();
+        const ans2 = studentAnswers[`${testId}_2`]?.trim();
+        
+        if (ans1 === a1Correct?.trim()) score += 50;
+        if (a2Correct && ans2 === a2Correct?.trim()) score += 50;
+        else if (!a2Correct) score += 50; // 2問目がない場合は1問正解で満点
+
+        setTestScore(prev => ({ ...prev, [testId]: score }));
+      };
+
+      // スケジュール・リマインダー管理
       const handleReminderSubmit = async (e) => {
         e.preventDefault();
         if (!remText.trim() || !remTime) return;
+
         if (editingRemId) {
-          await updateDoc(doc(db, "reminders", editingRemId), { text: remText, time: remTime });
+          if (isUsingFirebase) {
+            await updateDoc(doc(db, "reminders", editingRemId), { text: remText, time: remTime });
+          } else {
+            setReminders(prev => prev.map(r => r.id === editingRemId ? { ...r, text: remText, time: remTime } : r));
+          }
           setEditingRemId(null);
         } else {
-          await addDoc(collection(db, "reminders"), { text: remText, time: remTime, createdAt: new Date().toISOString() });
+          const newRem = { text: remText, time: remTime, createdAt: new Date().toISOString() };
+          if (isUsingFirebase) {
+            await addDoc(collection(db, "reminders"), newRem);
+          } else {
+            setReminders(prev => [ { id: `mock-rem-${Date.now()}`, ...newRem }, ...prev ].sort((a,b)=>a.time.localeCompare(b.time)));
+          }
         }
         setRemText(''); setRemTime('');
       };
 
+      // 擬似削除（モックでも動作するように分岐）
+      const handleDeleteReminder = async (id) => {
+        if (isUsingFirebase) {
+          await deleteDoc(doc(db, "reminders", id));
+        } else {
+          setReminders(prev => prev.filter(r => r.id !== id));
+        }
+      };
+
+      // 会議室作成
+      const handleCreateRoom = async (e) => {
+        e.preventDefault();
+        const roomName = roomInput.trim();
+        if (!roomName) return;
+
+        const todayStr = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+        const newRoomData = {
+          name: roomName,
+          meetLink: meetLinkInput.trim() || "https://meet.google.com/",
+          date: todayStr,
+          createdAt: new Date().toISOString()
+        };
+
+        if (isUsingFirebase) {
+          try {
+            const roomRef = doc(db, "rooms", roomName);
+            const roomSnap = await getDoc(roomRef);
+            if (roomSnap.exists()) {
+              alert(`❌ 「${roomName}」はすでに作成されています。`);
+              return;
+            }
+            await setDoc(roomRef, newRoomData);
+            alert(`🎉 ルーム「${roomName}」を作成しました！（今日の夜12時に自動削除されます）`);
+          } catch (err) {
+            alert(`⚠️ ルーム作成に失敗しました。`);
+          }
+        } else {
+          // モックモード
+          if (availableRooms.some(r => r.name === roomName)) {
+            alert(`❌ 「${roomName}」はすでに作成されています。`);
+            return;
+          }
+          setAvailableRooms(prev => [ { id: `mock-room-${Date.now()}`, ...newRoomData }, ...prev ]);
+          alert(`🎉 ルーム「${roomName}」を作成しました！（今日の夜12時に自動削除されます）`);
+        }
+        setRoomInput(''); setMeetLinkInput('');
+      };
+
       const handleOpenMeet = async () => {
-        if (!currentMeetLink) return;
-        await addDoc(collection(db, "meet_logs"), {
-          user: nickname, room: currentRoom, meetLink: currentMeetLink, timestamp: new Date().toISOString()
-        });
-        window.open(currentMeetLink, '_blank');
+        const link = currentMeetLink || "https://meet.google.com/";
+        const logData = {
+          user: nickname,
+          room: currentRoom,
+          meetLink: link,
+          timestamp: new Date().toISOString()
+        };
+
+        if (isUsingFirebase) {
+          await addDoc(collection(db, "meet_logs"), logData);
+        } else {
+          setMeetLogs(prev => [ { id: `mock-log-${Date.now()}`, ...logData }, ...prev ]);
+        }
+        window.open(link, '_blank');
       };
 
       return (
         <div className="flex flex-col min-h-screen">
-          <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
             <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md"><i className="fa-solid fa-graduation-cap"></i></div>
+                <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-md">
+                  <i className="fa-solid fa-graduation-cap text-lg"></i>
+                </div>
                 <span className="text-xl font-bold bg-gradient-to-r bg-clip-text text-transparent from-indigo-600 to-violet-600">ShareQ</span>
               </div>
               
               <div className="flex items-center space-x-4">
-                <div className="flex items-center gap-1 bg-slate-100 px-3 py-1 rounded-xl text-xs">
-                  <span className="text-slate-500">名前:</span>
-                  <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} className="bg-transparent font-bold text-slate-700 w-24 border-b border-transparent focus:border-indigo-500 outline-none" />
+                {/* 🖊️ 名前設定エリア */}
+                <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl">
+                  <span className="text-indigo-600 font-bold text-xs flex items-center gap-1">
+                    <i className="fa-solid fa-user-pen"></i>名前:
+                  </span>
+                  <input 
+                    type="text" 
+                    value={nickname} 
+                    onChange={e => setNickname(e.target.value)} 
+                    className="bg-transparent font-bold text-slate-800 w-28 border-b border-indigo-300 focus:border-indigo-600 outline-none text-sm transition-all" 
+                    placeholder="名前を入力" 
+                  />
                 </div>
-                {currentRoom && <span className="bg-indigo-50 text-indigo-700 text-xs px-3 py-1.5 rounded-full font-bold"><i className="fa-solid fa-door-open mr-1"></i> {currentRoom}</span>}
-                <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-3 py-1.5 rounded-full font-medium flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> Cloud Connected
+                {currentRoom && (
+                  <span className="bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-full font-bold flex items-center gap-1 shadow-sm animate-pulse">
+                    <i className="fa-solid fa-door-open"></i> {currentRoom}
+                  </span>
+                )}
+                <span className={`hidden sm:flex border text-xs px-3 py-1.5 rounded-full font-medium items-center gap-1.5 ${isUsingFirebase ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                  <span className={`w-2 h-2 rounded-full animate-pulse ${isUsingFirebase ? 'bg-emerald-500' : 'bg-amber-500'}`}></span> 
+                  {isUsingFirebase ? 'Cloud 同期中' : 'プレビューモード(保存一時的)'}
                 </span>
               </div>
             </div>
           </header>
 
-          <div className="flex-1 max-w-7xl w-full mx-auto px-4 py-8 flex flex-col md:flex-row gap-8">
-            <nav className="w-full md:w-64 flex flex-row md:flex-col gap-2 h-fit">
-              <button onClick={() => setActiveTab('dashboard')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-house w-5"></i> ダッシュボード</button>
-              <button onClick={() => setActiveTab('create')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'create' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-plus w-5"></i> 問題を作る</button>
-              <button onClick={() => setActiveTab('questions')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'questions' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-list w-5"></i> 問題一覧・採点</button>
-              <button onClick={() => setActiveTab('ai-chat')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'ai-chat' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-paper-plane w-5"></i> 先生への質問箱</button>
-              <button onClick={() => setActiveTab('room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-users w-5"></i> ルーム会議 ({availableRooms.length})</button>
-              <button onClick={() => setActiveTab('admin')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${activeTab === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><i className="fa-solid fa-lock w-5"></i> 管理画面 ({adminQuestions.filter(q=>q.status==="未対応").length + meetLogs.length})</button>
+          <div className="flex-1 max-w-7xl w-full mx-auto px-4 py-8 flex flex-col md:flex-row gap-6">
+            {/* ナビゲーションメニュー */}
+            <nav className="w-full md:w-64 flex flex-row md:flex-col gap-1.5 h-fit overflow-x-auto pb-2 md:pb-0 custom-scrollbar">
+              <button onClick={() => setActiveTab('dashboard')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-house w-5"></i> ダッシュボード</button>
+              <button onClick={() => setActiveTab('test-room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'test-room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-file-signature w-5"></i> 📝 小テストを解く</button>
+              <button onClick={() => setActiveTab('create')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'create' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-plus w-5"></i> クイズを作る</button>
+              <button onClick={() => setActiveTab('questions')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'questions' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-list w-5"></i> クイズ一覧・採点</button>
+              <button onClick={() => setActiveTab('ai-chat')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'ai-chat' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-paper-plane w-5"></i> 先生への質問箱</button>
+              <button onClick={() => setActiveTab('room')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'room' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-users w-5"></i> ルーム会議 ({availableRooms.length})</button>
+              <button onClick={() => setActiveTab('links')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'links' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-600 hover:bg-slate-100'}`}><i className="fa-solid fa-link w-5"></i> 🌐 リンク集</button>
+              <button onClick={() => setActiveTab('admin')} className={`flex-1 md:flex-initial flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab === 'admin' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100'}`}><i className="fa-solid fa-lock w-5"></i> 先生用管理画面</button>
             </nav>
 
-            <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[400px]">
+            {/* メイン表示エリア */}
+            <main className="flex-1 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm min-h-[450px]">
               
+              {/* 🏠 ダッシュボード（宿題・お知らせ掲示板） */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">ダッシュボード</h2>
-                    <p className="text-slate-500 text-sm">スケジュールの管理や進捗を確認できます。</p>
+                  {/* 📢 今日のお知らせ表示板 */}
+                  <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 shadow-sm">
+                    <h3 className="text-base font-bold text-amber-800 flex items-center gap-2 mb-3">
+                      <i className="fa-solid fa-bullhorn text-lg text-orange-500 animate-pulse"></i> 📢 今日の宿題・大切なお知らせ
+                    </h3>
+                    {announcements.length === 0 ? (
+                      <p className="text-sm text-slate-500 italic">今日のお知らせや宿題はまだありません。</p>
+                    ) : (
+                      <div className="bg-white p-4 rounded-xl border border-amber-100 shadow-sm">
+                        <p className="text-slate-800 font-bold text-sm whitespace-pre-line leading-relaxed">{announcements[0].text}</p>
+                        <p className="text-[10px] text-slate-400 mt-2 text-right">更新日時: {announcements[0].createdAt?.substring(11,16)}</p>
+                      </div>
+                    )}
                   </div>
-                  <form onSubmit={handleReminderSubmit} className="bg-slate-50 p-4 rounded-xl border flex flex-col sm:flex-row gap-3">
-                    <input type="text" value={remText} onChange={e => setRemText(e.target.value)} placeholder="予定・リマインダー内容" className="flex-1 px-3 py-2 text-sm rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500" required />
-                    <input type="datetime-local" value={remTime} onChange={e => setRemTime(e.target.value)} className="px-3 py-2 text-sm rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500" required />
-                    <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold">{editingRemId ? '更新' : '追加'}</button>
+
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">個人スケジュール管理</h2>
+                    <p className="text-slate-500 text-sm">自分だけの予定や宿題の締め切りをメモしておけます。</p>
+                  </div>
+                  <form onSubmit={handleReminderSubmit} className="bg-slate-50 p-4 rounded-xl border flex flex-col sm:flex-row gap-3 shadow-inner">
+                    <input type="text" value={remText} onChange={e => setRemText(e.target.value)} placeholder="例: 明日の漢字ドリル提出" className="flex-1 px-3 py-2 text-sm rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white" required />
+                    <input type="datetime-local" value={remTime} onChange={e => setRemTime(e.target.value)} className="px-3 py-2 text-sm rounded-lg border outline-none focus:ring-2 focus:ring-indigo-500 bg-white" required />
+                    <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-bold transition-all shrink-0">
+                      {editingRemId ? '更新する' : '追加する'}
+                    </button>
                   </form>
                   <div className="space-y-2">
-                    {reminders.map(rem => (
-                      <div key={rem.id} className="flex justify-between items-center p-3 border rounded-xl bg-white shadow-sm">
-                        <div><p className="text-sm font-bold">{rem.text}</p><p className="text-xs text-indigo-600">{rem.time.replace('T', ' ')}</p></div>
-                        <div className="flex gap-2">
-                          <button onClick={() => { setEditingRemId(rem.id); setRemText(rem.text); setRemTime(rem.time); }} className="text-slate-400 hover:text-indigo-600 text-sm"><i className="fa-solid fa-pen"></i></button>
-                          <button onClick={() => deleteDoc(doc(db, "reminders", rem.id))} className="text-slate-400 hover:text-rose-600 text-sm"><i className="fa-solid fa-trash"></i></button>
+                    {reminders.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-6 border border-dashed rounded-xl">登録されているスケジュールはありません。</p>
+                    ) : (
+                      reminders.map(rem => (
+                        <div key={rem.id} className="flex justify-between items-center p-3 border rounded-xl bg-white shadow-sm hover:border-slate-300 transition-all">
+                          <div>
+                            <p className="text-sm font-bold text-slate-800">{rem.text}</p>
+                            <p className="text-xs text-indigo-600 font-semibold mt-0.5">
+                              <i className="fa-regular fa-clock mr-1"></i>{rem.time.replace('T', ' ')}
+                            </p>
+                          </div>
+                          <div className="flex gap-1">
+                            <button onClick={() => { setEditingRemId(rem.id); setRemText(rem.text); setRemTime(rem.time); }} className="p-2 text-slate-400 hover:text-indigo-600 transition-all text-sm"><i className="fa-solid fa-pen"></i></button>
+                            <button onClick={() => handleDeleteReminder(rem.id)} className="p-2 text-slate-400 hover:text-rose-600 transition-all text-sm"><i className="fa-solid fa-trash"></i></button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </div>
               )}
 
+              {/* 📝 小テストを解く */}
+              {activeTab === 'test-room' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">📝 配信中の小テスト一覧</h2>
+                    <p className="text-slate-500 text-sm">先生が作成した確認テストです。何度も挑戦して満点を目指そう！</p>
+                  </div>
+                  {tests.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-12 border border-dashed rounded-2xl">現在、公開されているテストはありません。</p>
+                  ) : (
+                    <div className="space-y-6">
+                      {tests.map(t => (
+                        <div key={t.id} className="border-2 border-indigo-100 rounded-2xl p-5 bg-gradient-to-b from-white to-slate-50 space-y-4 shadow-sm">
+                          <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2">
+                            <i className="fa-solid fa-file-lines text-indigo-600"></i> {t.title}
+                          </h3>
+                          <div className="space-y-4 bg-white p-4 rounded-xl border border-slate-100">
+                            <div>
+                              <p className="text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                                <span className="w-5 h-5 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-[10px] font-black">1</span>
+                                {t.q1}
+                              </p>
+                              <input 
+                                type="text" 
+                                placeholder="回答を入力してください" 
+                                value={studentAnswers[`${t.id}_1`] || ''}
+                                onChange={e => setStudentAnswers(prev => ({...prev, [`${t.id}_1`]: e.target.value}))} 
+                                className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" 
+                              />
+                            </div>
+                            {t.q2 && (
+                              <div>
+                                <p className="text-sm font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                                  <span className="w-5 h-5 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center text-[10px] font-black">2</span>
+                                  {t.q2}
+                                </p>
+                                <input 
+                                  type="text" 
+                                  placeholder="回答を入力してください" 
+                                  value={studentAnswers[`${t.id}_2`] || ''}
+                                  onChange={e => setStudentAnswers(prev => ({...prev, [`${t.id}_2`]: e.target.value}))} 
+                                  className="w-full px-3 py-2 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500" 
+                                />
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col sm:flex-row justify-between items-center gap-3">
+                            <button 
+                              onClick={() => handleGradeTest(t.id, t.a1, t.a2)} 
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-md transition-all w-full sm:w-auto text-center"
+                            >
+                              テストを提出して採点する
+                            </button>
+                            {testScore[t.id] !== undefined && (
+                              <div className="bg-rose-50 border border-rose-200 px-6 py-2 rounded-2xl text-center w-full sm:w-auto">
+                                <span className="text-[10px] text-rose-600 font-extrabold block tracking-wider">採点結果</span>
+                                <strong className="text-2xl text-rose-600 font-black">{testScore[t.id]} 点 / 100点</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* クイズを作る */}
               {activeTab === 'create' && (
                 <div className="space-y-6">
-                  <h2 className="text-xl font-bold text-slate-900">新しい問題の作成 {currentRoom && `(Room: ${currentRoom})`}</h2>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">新しい学習クイズの公開</h2>
+                    <p className="text-slate-500 text-sm">みんなで解き合う4択問題や、○✕テストを作ってみましょう！</p>
+                  </div>
                   <form onSubmit={handleSubmit} className="space-y-5">
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-2">問題文</label>
-                      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例: 日本で一番大きい湖は？" className="w-full px-4 py-2.5 rounded-xl border outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="例: 10 + 10 は？" className="w-full px-4 py-2.5 rounded-xl border outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-2">形式</label>
                       <div className="flex gap-4">
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={type === 'choice'} onChange={() => setType('choice')} /> 4択クイズ</label>
-                        <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={type === 'boolean'} onChange={() => setType('boolean')} /> ○✕問題</label>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm font-medium"><input type="radio" checked={type === 'choice'} onChange={() => setType('choice')} className="accent-indigo-600" /> 4択クイズ</label>
+                        <label className="flex items-center gap-2 cursor-pointer text-sm font-medium"><input type="radio" checked={type === 'boolean'} onChange={() => setType('boolean')} className="accent-indigo-600" /> ○✕問題</label>
                       </div>
                     </div>
                     {type === 'choice' ? (
@@ -294,89 +684,60 @@
                         <label className="block text-sm font-semibold text-slate-700">選択肢</label>
                         {options.map((option, i) => (
                           <div key={i} className="flex items-center gap-2">
-                            <input type="text" value={option} onChange={(e) => { const n = [...options]; n[i] = e.target.value; setOptions(n); }} placeholder={`選択肢 ${i+1}`} className="flex-1 px-4 py-2 border rounded-xl" />
-                            <button type="button" onClick={() => setCorrectAnswer(option)} className={`px-3 py-2 text-xs font-bold rounded-lg border ${correctAnswer === option && option !== '' ? 'bg-emerald-500 text-white' : 'bg-white text-slate-500'}`}>正解にする</button>
+                            <input type="text" value={option} onChange={(e) => { const n = [...options]; n[i] = e.target.value; setOptions(n); }} placeholder={`選択肢 ${i+1}`} className="flex-1 px-4 py-2 border rounded-xl text-sm" required={i < 2} />
+                            <button type="button" onClick={() => setCorrectAnswer(option)} className={`px-3 py-2 text-xs font-bold rounded-lg border transition-all ${correctAnswer === option && option !== '' ? 'bg-emerald-500 text-white border-transparent' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>正解にする</button>
                           </div>
                         ))}
                       </div>
                     ) : (
                       <div className="flex gap-3">
-                        <button type="button" onClick={() => setCorrectAnswer('true')} className={`flex-1 py-3 font-bold rounded-xl border ${correctAnswer === 'true' ? 'bg-emerald-500 text-white' : 'bg-slate-50'}`}>⭕ ○</button>
-                        <button type="button" onClick={() => setCorrectAnswer('false')} className={`flex-1 py-3 font-bold rounded-xl border ${correctAnswer === 'false' ? 'bg-rose-500 text-white' : 'bg-slate-50'}`}>❌ ✕</button>
+                        <button type="button" onClick={() => setCorrectAnswer('true')} className={`flex-1 py-3 font-bold rounded-xl border transition-all ${correctAnswer === 'true' ? 'bg-emerald-500 text-white border-transparent' : 'bg-slate-50 hover:bg-slate-100'}`}>⭕ ○</button>
+                        <button type="button" onClick={() => setCorrectAnswer('false')} className={`flex-1 py-3 font-bold rounded-xl border transition-all ${correctAnswer === 'false' ? 'bg-rose-500 text-white border-transparent' : 'bg-slate-50 hover:bg-slate-100'}`}>❌ ✕</button>
                       </div>
                     )}
-                    <button type="submit" className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl shadow-lg hover:bg-indigo-700">問題を保存して公開</button>
+                    <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-xl shadow-lg transition-all text-sm">
+                      クイズを保存して公開する
+                    </button>
                   </form>
                 </div>
               )}
 
+              {/* クイズ一覧 ＆ 採点 */}
               {activeTab === 'questions' && (
                 <div className="space-y-6">
-                  <h2 className="text-xl font-bold text-slate-900">問題一覧と即時採点</h2>
-                  <div className="grid grid-cols-1 gap-4">
-                    {questions.filter(q => !currentRoom || q.room === currentRoom).map((q) => (
-                      <div key={q.id} className="p-5 border border-slate-200 rounded-2xl bg-slate-50/50">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border mb-2 inline-block">{q.type === 'choice' ? '4択クイズ' : '○✕問題'}</span>
-                        <h4 className="font-bold text-slate-800 text-base mb-3">{q.title}</h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          {q.type === 'choice' ? q.options.map((opt, idx) => (
-                            <button key={idx} onClick={() => handleAnswerQuiz(q.id, opt, q.correctAnswer)} className={`p-3 rounded-xl text-xs text-left border font-medium ${selectedAnswers[q.id] === opt ? 'bg-indigo-600 text-white' : 'bg-white hover:bg-slate-100'}`}>{opt}</button>
-                          )) : (
-                            <>
-                              <button onClick={() => handleAnswerQuiz(q.id, 'true', q.correctAnswer)} className={`p-3 rounded-xl text-xs border font-medium ${selectedAnswers[q.id] === 'true' ? 'bg-indigo-600 text-white' : 'bg-white'}`}>⭕ ○</button>
-                              <button onClick={() => handleAnswerQuiz(q.id, 'false', q.correctAnswer)} className={`p-3 rounded-xl text-xs border font-medium ${selectedAnswers[q.id] === 'false' ? 'bg-indigo-600 text-white' : 'bg-white'}`}>❌ ✕</button>
-                            </>
-                          )}
-                        </div>
-                        {selectedAnswers[q.id] && (
-                          <div className="mt-4 p-4 rounded-xl border bg-white space-y-2">
-                            <div className="flex items-center gap-2">
-                              {String(selectedAnswers[q.id]) === String(q.correctAnswer) ? <span className="text-emerald-600 font-bold text-sm">⭕ 正解！</span> : <span className="text-rose-500 font-bold text-sm">❌ 不正解 (正解: {String(q.correctAnswer) === 'true' ? '○' : String(q.correctAnswer) === 'false' ? '✕' : q.correctAnswer})</span>}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 🛠️ 生徒向け：先生への直通質問箱 ＋ 先生からの返信表示エリア */}
-              {activeTab === 'ai-chat' && (
-                <div className="space-y-6">
                   <div>
-                    <h2 className="text-xl font-bold text-slate-900">📩 先生への直通質問箱</h2>
-                    <p className="text-slate-500 text-sm">わからないことを入力して送信してください。先生の管理画面へ届きます。</p>
+                    <h2 className="text-xl font-bold text-slate-900">クイズ一覧と即時採点</h2>
+                    <p className="text-slate-500 text-sm">公開されている問題に挑戦してみよう！</p>
                   </div>
-                  <form onSubmit={handleAskAIBox} className="space-y-3">
-                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力してください（例: 一次関数の解き方がわかりません）" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
-                    <button type="submit" disabled={chatLoading} className="bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shadow-md w-full sm:w-auto">{chatLoading ? '送信中...' : '先生に質問を送る'}</button>
-                  </form>
-                  {submitMessage && (
-                    <p className="text-xs font-semibold text-emerald-600">{submitMessage}</p>
-                  )}
-
-                  <hr className="border-slate-200" />
-
-                  {/* 🔽 本人宛ての先生からの解説をここに一覧表示する */}
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-bold text-slate-800"><i className="fa-solid fa-comments text-indigo-500 mr-1"></i> あなたが送った質問と先生からの解説</h3>
-                    {adminQuestions.filter(q => q.studentName === nickname).length === 0 ? (
-                      <p className="text-xs text-slate-400 py-4 border border-dashed text-center rounded-xl">まだここに質問履歴はありません。</p>
+                  <div className="grid grid-cols-1 gap-4">
+                    {questions.length === 0 ? (
+                      <p className="text-sm text-slate-400 text-center py-12 border border-dashed rounded-xl">まだクイズはありません。上の「問題を作る」から作成できます！</p>
                     ) : (
-                      adminQuestions.filter(q => q.studentName === nickname).map(aq => (
-                        <div key={aq.id} className="p-4 border rounded-xl bg-white shadow-sm space-y-2">
-                          <div className="flex justify-between items-center text-[11px]">
-                            <span className="font-medium text-slate-500">質問: 「{aq.question}」</span>
-                            <span className={`px-2 py-0.5 rounded-full font-bold ${aq.status === "回答済み" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{aq.status}</span>
+                      questions.map((q) => (
+                        <div key={q.id} className="p-5 border border-slate-200 rounded-2xl bg-slate-50/50 hover:bg-slate-50 transition-all shadow-sm">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border mb-2 inline-block">
+                            {q.type === 'choice' ? '4択クイズ' : '○✕問題'}
+                          </span>
+                          <h4 className="font-bold text-slate-800 text-base mb-3 leading-relaxed">{q.title}</h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            {q.type === 'choice' ? q.options.map((opt, idx) => (
+                              <button key={idx} onClick={() => handleAnswerQuiz(q.id, opt)} className={`p-3 rounded-xl text-xs text-left border font-medium transition-all ${selectedAnswers[q.id] === opt ? 'bg-indigo-600 text-white shadow-md border-transparent' : 'bg-white hover:bg-slate-100'}`}>{opt}</button>
+                            )) : (
+                              <>
+                                <button onClick={() => handleAnswerQuiz(q.id, 'true')} className={`p-3 rounded-xl text-xs border font-medium transition-all ${selectedAnswers[q.id] === 'true' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white hover:bg-slate-100'}`}>⭕ ○</button>
+                                <button onClick={() => handleAnswerQuiz(q.id, 'false')} className={`p-3 rounded-xl text-xs border font-medium transition-all ${selectedAnswers[q.id] === 'false' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white hover:bg-slate-100'}`}>❌ ✕</button>
+                              </>
+                            )}
                           </div>
-                          {aq.status === "回答済み" ? (
-                            <div className="bg-indigo-50/70 border border-indigo-100 p-3 rounded-lg">
-                              <p className="text-xs font-bold text-indigo-700 mb-1">👨‍🏫 先生からの解説・アドバイス:</p>
-                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{aq.reply}</p>
+                          {selectedAnswers[q.id] && (
+                            <div className="mt-4 p-3 rounded-xl border border-dashed bg-white flex items-center justify-between">
+                              <span className="text-xs text-slate-500">あなたの回答: <strong className="text-slate-700 font-bold">{selectedAnswers[q.id] === 'true' ? '○' : selectedAnswers[q.id] === 'false' ? '✕' : selectedAnswers[q.id]}</strong></span>
+                              {String(selectedAnswers[q.id]) === String(q.correctAnswer) ? (
+                                <span className="bg-emerald-50 text-emerald-700 text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-200">⭕ 正解！</span>
+                              ) : (
+                                <span className="bg-rose-50 text-rose-700 text-xs font-bold px-3 py-1.5 rounded-lg border border-rose-200">❌ 不正解 (正解: {String(q.correctAnswer) === 'true' ? '○' : String(q.correctAnswer) === 'false' ? '✕' : q.correctAnswer})</span>
+                              )}
                             </div>
-                          ) : (
-                            <p className="text-xs text-slate-400 italic"><i className="fa-solid fa-clock animate-pulse mr-1"></i> 現在、先生が解説を書いています。少々お待ちください...</p>
                           )}
                         </div>
                       ))
@@ -385,73 +746,107 @@
                 </div>
               )}
 
+              {/* 先生への直通質問箱 */}
+              {activeTab === 'ai-chat' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">📩 先生への直通質問箱</h2>
+                    <p className="text-slate-500 text-sm">自習してわからなかったことや、疑問点を入力してください。先生が気付き次第、管理画面から解説を作成して返信してくれます。</p>
+                  </div>
+                  <form onSubmit={handleAskAIBox} className="space-y-3">
+                    <textarea value={userQuestion} onChange={e => setUserQuestion(e.target.value)} placeholder="質問を入力してください（例: 小数の割り算の筆算の、小数点の移動のさせ方がよくわかりません...）" className="w-full h-24 p-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" required></textarea>
+                    <button type="submit" disabled={chatLoading} className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold px-5 py-2.5 rounded-xl shadow-md transition-all w-full sm:w-auto">{chatLoading ? '送信中...' : '先生に質問を送る'}</button>
+                  </form>
+                  {submitMessage && (
+                    <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-xl text-xs font-bold">
+                      {submitMessage}
+                    </div>
+                  )}
+
+                  <hr className="border-slate-200" />
+
+                  <div className="space-y-3">
+                    <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1">
+                      <i className="fa-solid fa-comments text-indigo-500"></i> あなたが送った質問履歴と先生の回答
+                    </h3>
+                    {adminQuestions.filter(q => q.studentName === nickname).length === 0 ? (
+                      <p className="text-xs text-slate-400 py-6 border border-dashed text-center rounded-xl">まだ質問を送信していません。上の送信欄から試せます！</p>
+                    ) : (
+                      adminQuestions.filter(q => q.studentName === nickname).map(aq => (
+                        <div key={aq.id} className="p-4 border rounded-xl bg-white shadow-sm space-y-3">
+                          <div className="flex justify-between items-center text-[11px] gap-2">
+                            <span className="font-semibold text-slate-600 truncate">質問: 「{aq.question}」</span>
+                            <span className={`px-2 py-0.5 rounded-full font-bold shrink-0 ${aq.status === "回答済み" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{aq.status}</span>
+                          </div>
+                          {aq.status === "回答済み" ? (
+                            <div className="bg-indigo-50/70 border border-indigo-100 p-3 rounded-lg">
+                              <p className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-1">
+                                <i className="fa-solid fa-chalkboard-user"></i> 先生からの回答:
+                              </p>
+                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line font-medium">{aq.reply}</p>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-400 italic flex items-center gap-1">
+                              <i className="fa-solid fa-clock animate-pulse"></i> 先生が現在、回答を作成中です...
+                            </p>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 👥 ルーム会議室（自動期限付き） */}
               {activeTab === 'room' && (
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">👥 ルーム会議室</h2>
+                    <p className="text-slate-500 text-xs mt-0.5">⚠️ 作成されたルームはすべて、日付が変わる夜の12時（24:00）を過ぎると、自動的に無効化され一覧から削除されます。</p>
                   </div>
                   
                   {!currentRoom ? (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       <div className="lg:col-span-2 bg-slate-50 p-5 rounded-2xl border space-y-4">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                          <i className="fa-solid fa-square-plus text-indigo-600"></i> 新しいルームを新規作成・登録
+                          <i className="fa-solid fa-square-plus text-indigo-600"></i> 本日の勉強ルームを新規作成
                         </h3>
-                        <form onSubmit={async (e) => {
-                          e.preventDefault();
-                          const roomName = roomInput.trim();
-                          if (!roomName) return;
-                          
-                          try {
-                            const roomRef = doc(db, "rooms", roomName);
-                            const roomSnap = await getDoc(roomRef);
-                            if (roomSnap.exists()) {
-                              alert(`❌ 「${roomName}」はすでに作成されています。`);
-                              return;
-                            }
-
-                            await setDoc(roomRef, {
-                              name: roomName,
-                              meetLink: meetLinkInput.trim() || "https://meet.google.com/",
-                              createdAt: new Date().toISOString()
-                            });
-                            
-                            alert(`🎉 ルーム「${roomName}」を作成しました！`);
-                            setRoomInput('');
-                            setMeetLinkInput('');
-                          } catch (err) {
-                            alert(`⚠️ ルーム作成に失敗しました。`);
-                          }
-                        }} className="space-y-4">
+                        <form onSubmit={handleCreateRoom} className="space-y-4">
                           <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">① ルーム名</label>
-                            <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 数学演習" className="w-full px-4 py-2 rounded-xl border font-bold outline-none focus:ring-2 focus:ring-indigo-500" required />
+                            <label className="block text-xs font-bold text-slate-600 mb-1">① ルーム名 (重複不可)</label>
+                            <input type="text" value={roomInput} onChange={e => setRoomInput(e.target.value)} placeholder="例: 算数4班、しつもん部屋" className="w-full px-4 py-2 rounded-xl border font-bold outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white" required />
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">② Google Meetリンク</label>
-                            <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                            <label className="block text-xs font-bold text-slate-600 mb-1">② Google Meetなどのリンク</label>
+                            <input type="url" value={meetLinkInput} onChange={e => setMeetLinkInput(e.target.value)} placeholder="https://meet.google.com/xxx-xxxx-xxx" className="w-full px-4 py-2 rounded-xl border text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
+                            <span className="text-[10px] text-slate-400 mt-1 block">※空欄の場合はデフォルトのGoogle Meetが適用されます。</span>
                           </div>
-                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full shadow-md text-sm">
-                            <i className="fa-solid fa-plus mr-1"></i> ルームを新規作成する
+                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-6 rounded-xl block w-full shadow-md text-sm transition-all">
+                            本日のルームとして新規登録する
                           </button>
                         </form>
                       </div>
 
-                      <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 max-h-[360px] overflow-y-auto">
+                      <div className="bg-white p-5 rounded-2xl border border-slate-200 space-y-3 max-h-[360px] overflow-y-auto custom-scrollbar">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center justify-between">
-                          <span><i className="fa-solid fa-right-to-bracket text-emerald-600 mr-1"></i> ルームを選んで入室</span>
+                          <span>🚪 本日の有効なルーム</span>
                           <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">{availableRooms.length}</span>
                         </h3>
                         {availableRooms.length === 0 ? (
-                          <p className="text-xs text-slate-400 text-center py-12 border border-dashed rounded-xl">まだルームがありません。</p>
+                          <p className="text-xs text-slate-400 text-center py-12 border border-dashed rounded-xl leading-relaxed">
+                            本日のルームはありません。<br/>左のフォームから作成してください。
+                          </p>
                         ) : (
                           <div className="space-y-2">
                             {availableRooms.map((rm) => (
-                              <div key={rm.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-emerald-50/50 flex justify-between items-center group">
+                              <div key={rm.id} className="p-3 border border-slate-100 rounded-xl bg-slate-50 hover:bg-emerald-50/50 flex justify-between items-center group transition-all">
                                 <div className="truncate pr-2">
                                   <p className="text-xs font-bold text-slate-800 truncate">{rm.name}</p>
+                                  <span className="text-[9px] text-slate-400 font-mono">本日限定有効</span>
                                 </div>
-                                <button onClick={() => setCurrentRoom(rm.name)} className="bg-white group-hover:bg-emerald-600 text-emerald-600 group-hover:text-white border border-emerald-200 text-xs font-bold px-3 py-1.5 rounded-lg">入室</button>
+                                <button onClick={() => setCurrentRoom(rm.name)} className="bg-white text-emerald-600 border border-emerald-200 text-xs font-bold px-3 py-1.5 rounded-lg group-hover:bg-emerald-600 group-hover:text-white group-hover:border-transparent transition-all shrink-0">
+                                  入室
+                                </button>
                               </div>
                             ))}
                           </div>
@@ -461,77 +856,174 @@
                   ) : (
                     <div className="space-y-4">
                       <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-xl flex justify-between items-center">
-                        <p className="text-sm font-bold text-emerald-800">ルーム「<strong>{currentRoom}</strong>」に滞年中</p>
-                        <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 text-rose-700 px-3 py-1 rounded-lg text-xs font-bold">退室する</button>
+                        <p className="text-sm font-bold text-emerald-800 flex items-center gap-2">
+                          <i className="fa-solid fa-door-open text-emerald-600 animate-pulse"></i> ルーム「<strong>{currentRoom}</strong>」に入室中
+                        </p>
+                        <button onClick={() => setCurrentRoom(null)} className="bg-rose-100 hover:bg-rose-200 text-rose-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">退室する</button>
                       </div>
 
                       <div className="border border-slate-200 rounded-2xl p-6 bg-white shadow-sm space-y-4 text-center max-w-lg mx-auto">
-                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl"><i className="fa-solid fa-video"></i></div>
+                        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner"><i className="fa-solid fa-video"></i></div>
                         <div>
                           <h3 className="font-bold text-slate-800">Google Meet 遠隔通話</h3>
+                          <p className="text-xs text-slate-400 mt-1">下のボタンから起動できます。同時に先生の管理画面に参加ログが記録されます。</p>
                         </div>
-                        {currentMeetLink ? (
-                          <button onClick={handleOpenMeet} className="bg-indigo-600 text-white font-bold py-3 px-6 rounded-xl text-sm"><i className="fa-solid fa-arrow-up-right-from-square"></i> Google Meet を起動して参加</button>
-                        ) : (
-                          <p className="text-rose-500 text-xs">Meetが登録されていません。</p>
-                        )}
+                        <button onClick={handleOpenMeet} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl text-sm transition-all shadow-md">
+                          <i className="fa-solid fa-arrow-up-right-from-square mr-1"></i> Google Meet を起動して参加
+                        </button>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* 👨‍🏫 管理者画面：届いた質問に対して解説を入力して本人に送る */}
+              {/* 🌐 リンク集 */}
+              {activeTab === 'links' && (
+                <div className="space-y-6">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">🌐 おすすめ学習リンク集</h2>
+                    <p className="text-slate-500 text-sm">勉強や調べ学習でよく使う、安全で便利な外部サイトへのリンクです。</p>
+                  </div>
+                  {learningLinks.length === 0 ? (
+                    <p className="text-sm text-slate-400 text-center py-12 border border-dashed rounded-xl">登録されている学習リンクはありません。</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {learningLinks.map((link) => (
+                        <a 
+                          key={link.id} 
+                          href={link.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="p-4 border border-slate-200 rounded-xl hover:bg-indigo-50/50 hover:border-indigo-200 transition-all block space-y-1 bg-slate-50/50 shadow-sm"
+                        >
+                          <h4 className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                            <i className={`fa-solid ${link.icon || 'fa-globe'} text-indigo-600`}></i> 
+                            {link.title}
+                          </h4>
+                          <p className="text-xs text-slate-500">{link.description || 'サイトへのリンクです。クリックして開くことができます。'}</p>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 👨‍🏫 先生用管理画面 */}
               {activeTab === 'admin' && (
                 <div>
                   {!isAdminAuthenticated ? (
                     <div className="max-w-md mx-auto py-12 space-y-6 text-center">
                       <div className="w-16 h-16 bg-slate-100 text-slate-700 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner"><i className="fa-solid fa-lock"></i></div>
+                      <div>
+                        <h3 className="font-bold text-slate-800">管理者認証が必要です</h3>
+                        <p className="text-slate-400 text-xs mt-1">小テスト公開・お知らせ更新などはこちらで認証します。</p>
+                      </div>
                       <form onSubmit={handleAdminLogin} className="space-y-3">
-                        <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="パスワードを入力してください" className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800" required />
+                        <input type="password" value={passwordInput} onChange={e => setPasswordInput(e.target.value)} placeholder="パスワードを入力してください" className="w-full px-4 py-2.5 rounded-xl border text-center font-mono outline-none focus:ring-2 focus:ring-slate-800 bg-slate-50" required />
                         {loginError && <p className="text-xs text-rose-500 font-medium">{loginError}</p>}
-                        <button type="submit" className="w-full bg-slate-800 text-white font-bold py-2.5 rounded-xl text-sm">ロックを解除</button>
+                        <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-sm transition-all">ロックを解除</button>
                       </form>
                     </div>
                   ) : (
                     <div className="space-y-8">
                       <div className="flex justify-between items-start border-b pb-4">
-                        <div>
-                          <h2 className="text-xl font-bold text-rose-700 flex items-center gap-2"><i className="fa-solid fa-shield-halved"></i>管理者用コントロールパネル</h2>
-                        </div>
-                        <button onClick={handleAdminLogout} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold">ログアウト</button>
+                        <h2 className="text-lg font-bold text-rose-700 flex items-center gap-2">
+                          <i className="fa-solid fa-shield-halved"></i> 先生用コントロールセンター
+                        </h2>
+                        <button onClick={handleAdminLogout} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-bold transition-all">ログアウト</button>
                       </div>
 
-                      <div className="space-y-3">
-                        <h3 className="text-sm font-bold text-slate-800">🔴 ルーム・Google Meet 起動追跡ログ</h3>
-                        {meetLogs.length === 0 ? (
-                          <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">Meetの参加履歴はまだありません。</p>
-                        ) : (
-                          <div className="overflow-hidden border border-slate-200 rounded-xl bg-white">
-                            <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                              <thead className="bg-slate-50 text-slate-500 font-semibold">
-                                <tr>
-                                  <th className="px-4 py-2.5">参加ユーザー</th>
-                                  <th className="px-4 py-2.5">利用ルーム</th>
-                                  <th className="px-4 py-2.5">接続日時</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-200 text-slate-700 font-medium">
-                                {meetLogs.map(log => (
-                                  <tr key={log.id}>
-                                    <td className="px-4 py-2.5 text-indigo-600 font-bold">{log.user}</td>
-                                    <td className="px-4 py-2.5"><span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] border">{log.room}</span></td>
-                                    <td className="px-4 py-2.5 text-slate-400">{log.timestamp?.substring(5,16).replace('T', ' ')}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                      {/* 📢 宿題更新フォーム */}
+                      <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 space-y-3">
+                        <h3 className="text-sm font-bold text-amber-900 flex items-center gap-1.5"><i className="fa-solid fa-edit"></i> ① 今日の schoolの宿題・連絡事項を掲示する</h3>
+                        <form onSubmit={handleAddNotice} className="space-y-2">
+                          <textarea value={noticeInput} onChange={e => setNoticeInput(e.target.value)} placeholder="例: 今日の宿題は、計算ドリルP5の①〜⑩と、国語の漢字練習です！明日は体育館シューズを持ってきてね。" className="w-full h-20 p-2.5 text-xs border rounded-lg bg-white outline-none focus:ring-2 focus:ring-amber-500" required></textarea>
+                          <button type="submit" className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all">掲示板を更新する</button>
+                        </form>
+                      </div>
+
+                      {/* 📝 小テスト作成配信 */}
+                      <div className="bg-indigo-50/40 p-4 rounded-xl border border-indigo-200 space-y-3">
+                        <h3 className="text-sm font-bold text-indigo-900 flex items-center gap-1.5"><i className="fa-solid fa-file-medical"></i> ② 新しい小テストを配信する</h3>
+                        <form onSubmit={handleCreateTest} className="space-y-3">
+                          <input type="text" value={testTitle} onChange={e => setTestTitle(e.target.value)} placeholder="小テストのタイトル（例: 第1回 算数テスト）" className="w-full p-2 text-xs border rounded bg-white" required />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="text" value={testQ1} onChange={e => setTestQ1(e.target.value)} placeholder="第1問の問題文" className="p-2 text-xs border rounded bg-white" required />
+                            <input type="text" value={testA1} onChange={e => setTestA1(e.target.value)} placeholder="第1問の正解（完全一致で自動採点）" className="p-2 text-xs border rounded bg-white" required />
                           </div>
-                        )}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="text" value={testQ2} onChange={e => setTestQ2(e.target.value)} placeholder="第2問の問題文（省略可）" className="p-2 text-xs border rounded bg-white" />
+                            <input type="text" value={testA2} onChange={e => setTestA2(e.target.value)} placeholder="第2問の正解（省略可）" className="p-2 text-xs border rounded bg-white" />
+                          </div>
+                          <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all">テストを全員へ配信する</button>
+                        </form>
                       </div>
 
+                      {/* 🌐 おすすめ学習リンク管理 */}
+                      <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-200 space-y-4">
+                        <h3 className="text-sm font-bold text-emerald-900 flex items-center gap-1.5"><i className="fa-solid fa-link"></i> ③ おすすめ学習リンクを追加・管理する</h3>
+                        
+                        {/* リンク追加フォーム */}
+                        <form onSubmit={handleAddLink} className="space-y-3 bg-white p-3 rounded-lg border border-emerald-100">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input 
+                              type="text" 
+                              value={linkTitle} 
+                              onChange={e => setLinkTitle(e.target.value)} 
+                              placeholder="サイトの名前（例: NHK for School）" 
+                              className="p-2 text-xs border rounded bg-slate-50 outline-none focus:ring-1 focus:ring-emerald-500" 
+                              required 
+                            />
+                            <input 
+                              type="url" 
+                              value={linkUrl} 
+                              onChange={e => setLinkUrl(e.target.value)} 
+                              placeholder="URL（https://...）" 
+                              className="p-2 text-xs border rounded bg-slate-50 outline-none focus:ring-1 focus:ring-emerald-500" 
+                              required 
+                            />
+                          </div>
+                          <input 
+                            type="text" 
+                            value={linkDesc} 
+                            onChange={e => setLinkDesc(e.target.value)} 
+                            placeholder="簡単な紹介や説明（例: 動画で分かりやすく学べる学習サイトです）" 
+                            className="w-full p-2 text-xs border rounded bg-slate-50 outline-none focus:ring-1 focus:ring-emerald-500" 
+                          />
+                          <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-lg transition-all">
+                            おすすめリンクを追加する
+                          </button>
+                        </form>
+
+                        {/* 現在のリンク一覧（削除可能） */}
+                        <div className="space-y-2">
+                          <h4 className="text-xs font-bold text-emerald-800">登録済みリンク一覧:</h4>
+                          {learningLinks.length === 0 ? (
+                            <p className="text-[11px] text-slate-400 italic">登録されているおすすめリンクはありません。</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                              {learningLinks.map((link) => (
+                                <div key={link.id} className="flex justify-between items-center bg-white p-2 border rounded text-xs">
+                                  <div className="truncate pr-2">
+                                    <span className="font-bold text-slate-800">{link.title}</span>
+                                    <span className="text-[10px] text-slate-400 ml-2 truncate font-mono">({link.url})</span>
+                                  </div>
+                                  <button 
+                                    onClick={() => handleDeleteLink(link.id)} 
+                                    className="text-rose-500 hover:bg-rose-50 px-2 py-1 rounded transition-all font-bold text-[10px]"
+                                  >
+                                    削除
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 生徒からの質問＆返信 */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-bold text-slate-800">🚨 生徒からの質問リスト（解説返信機能付き）</h3>
+                        <h3 className="text-sm font-bold text-slate-800">🚨 生徒からの質問リスト（個別返信対応）</h3>
                         <div className="space-y-3">
                           {adminQuestions.length === 0 ? (
                             <p className="text-xs text-slate-400 py-6 text-center border-2 border-dashed rounded-xl">現在、届いている質問はありません。</p>
@@ -539,34 +1031,49 @@
                             adminQuestions.map(aq => (
                               <div key={aq.id} className={`p-4 border-2 rounded-xl bg-white space-y-3 ${aq.status === "回答済み" ? "border-slate-200 opacity-75" : "border-rose-100 bg-rose-50/10"}`}>
                                 <div className="flex justify-between text-xs text-slate-400 font-mono">
-                                  <span>差出人: <strong className="text-indigo-600 text-sm">{aq.studentName || "ゲスト"}</strong></span>
-                                  <span>ステータス: <strong className={aq.status === "回答済み" ? "text-emerald-600" : "text-amber-600 animate-pulse"}>{aq.status}</strong></span>
+                                  <span>生徒名: <strong className="text-indigo-600 text-xs">{aq.studentName}</strong></span>
+                                  <span>進捗状況: <strong className={aq.status === "回答済み" ? "text-emerald-600" : "text-amber-600 animate-pulse"}>{aq.status}</strong></span>
                                 </div>
-                                <div>
-                                  <p className="text-xs font-bold text-slate-500 mb-1">❓ 質問内容:</p>
-                                  <p className="bg-slate-50 p-3 rounded-lg border text-sm text-slate-800 font-medium">「 {aq.question} 」</p>
-                                </div>
-
-                                {/* 🖊️ 先生の解説入力エリア */}
+                                <p className="bg-slate-50 p-2.5 rounded-lg border text-xs text-slate-800 font-medium">「 {aq.question} ]</p>
                                 <div className="space-y-2">
-                                  <label className="block text-xs font-bold text-indigo-700">✍️ 本人への解説・回答を入力:</label>
-                                  <textarea 
-                                    value={adminReplies[aq.id] || aq.reply || ""} 
-                                    onChange={e => setAdminReplies(prev => ({ ...prev, [aq.id]: e.target.value }))}
-                                    placeholder="ここに解説やメッセージを書き込んでください" 
-                                    className="w-full p-2.5 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none h-20"
-                                  ></textarea>
+                                  <label className="block text-xs font-bold text-indigo-700">✍️ 解説やアドバイスを入力して送り返す:</label>
+                                  <textarea value={adminReplies[aq.id] || aq.reply || ""} onChange={e => setAdminReplies(prev => ({ ...prev, [aq.id]: e.target.value }))} placeholder="回答を書き込んでください" className="w-full p-2 text-xs border rounded-lg bg-white h-16 outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
                                 </div>
-
-                                <div className="flex justify-end gap-2 pt-1">
-                                  <button onClick={() => handleSendReply(aq.id)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm">
-                                    <i className="fa-solid fa-paper-plane mr-1"></i> {aq.status === "回答済み" ? "解説を修正して再送" : "解説を本人へ送る"}
-                                  </button>
-                                  <button onClick={async () => await deleteDoc(doc(db, "admin_escalations", aq.id))} className="text-rose-500 text-xs font-bold px-2 py-2 hover:bg-rose-50 rounded-lg">削除</button>
+                                <div className="flex justify-end gap-2">
+                                  <button onClick={() => handleSendReply(aq.id)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all">本人へ返信する</button>
+                                  <button onClick={async () => {
+                                    if(isUsingFirebase) await deleteDoc(doc(db, "admin_escalations", aq.id));
+                                    else setAdminQuestions(prev=>prev.filter(q=>q.id !== aq.id));
+                                  }} className="text-rose-500 text-[11px] font-bold px-2 py-1.5 hover:bg-rose-50 rounded-lg transition-all">履歴を削除</button>
                                 </div>
                               </div>
                             ))
                           )}
+                        </div>
+                      </div>
+
+                      {/* 会議室接続ログ */}
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-bold text-slate-800">🔴 ビデオ会議室 起動・接続ログ</h3>
+                        <div className="overflow-hidden border border-slate-200 rounded-xl bg-white text-xs shadow-sm">
+                          <table className="min-w-full divide-y divide-slate-200 text-left">
+                            <thead className="bg-slate-50 text-slate-500 font-semibold">
+                              <tr><th className="px-4 py-2.5">参加ユーザー</th><th className="px-4 py-2.5">利用ルーム</th><th className="px-4 py-2.5">利用日時</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200 text-slate-700 font-medium">
+                              {meetLogs.length === 0 ? (
+                                <tr><td colSpan="3" className="text-center py-6 text-slate-400 italic">起動履歴はありません。</td></tr>
+                              ) : (
+                                meetLogs.map(log => (
+                                  <tr key={log.id}>
+                                    <td className="px-4 py-2.5 text-indigo-600 font-bold">{log.user}</td>
+                                    <td className="px-4 py-2.5"><span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] border font-bold">{log.room}</span></td>
+                                    <td className="px-4 py-2.5 text-slate-400">{log.timestamp?.substring(5,16).replace('T', ' ')}</td>
+                                  </tr>
+                                ))
+                              )}
+                            </tbody>
+                          </table>
                         </div>
                       </div>
 
